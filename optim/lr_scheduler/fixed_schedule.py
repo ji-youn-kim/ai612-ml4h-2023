@@ -12,8 +12,8 @@ from . import LRScheduler, register_lr_scheduler
 class FixedLRSchedule(LRScheduler):
     """Decay the LR on a fixed schedule."""
     
-    def __init__(self, cfg: Namespace, optimizer):
-        super().__init__(cfg, optimizer)
+    def __init__(self, cfg: Namespace, optimizer, **kwargs):
+        super().__init__(cfg, optimizer, **kwargs)
 
         self.lr = cfg.lr
         if cfg.warmup_updates > 0:

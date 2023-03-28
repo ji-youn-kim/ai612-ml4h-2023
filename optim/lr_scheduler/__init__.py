@@ -22,8 +22,8 @@ from utils import setup_registry
     "--lr-scheduler", base_class=LRScheduler, default="fixed"
 )
 
-def build_lr_scheduler(cfg: Namespace, optimizer):
-    return build_lr_scheduler_(cfg, optimizer)
+def build_lr_scheduler(args: Namespace, optimizer):
+    return build_lr_scheduler_(args, optimizer)
 
 # automatically import any Python files in the optim/lr_scheduler/ directory
 for file in sorted(os.listdir(os.path.dirname(__file__))):

@@ -26,6 +26,7 @@ class BaseDataset(torch.utils.data.Dataset):
         raise NotImplementedError
     
     @classmethod
-    def build_dataset(cls, **kwargs):
+    def build_dataset(cls, args, **kwargs):
         """Build a new dataset instance."""
+        kwargs.update(vars(args))
         return cls(**kwargs)

@@ -22,12 +22,12 @@ __all__ = [
     _build_optimizer,
     register_optimizer,
     OPTIMIZER_REGISTRY
-) = setup_registry("--optimizer", base_class=Optimizer, required=True)
+) = setup_registry("--optimizer", base_class=Optimizer, required=True,)
 
-def build_optimizer(cfg: Namespace, params, *extra_args, **extra_kwargs):
+def build_optimizer(args: Namespace, params, *extra_args, **extra_kwargs):
     if all(isinstance(p, dict) for p in params):
         params = [t for p in params for t in p.values()]
-    return _build_optimizer(cfg, params, *extra_args, **extra_kwargs)
+    return _build_optimizer(args, params, *extra_args, **extra_kwargs)
 
 # automatically import any Python files in the optim/ directory
 for file in sorted(os.listdir(os.path.dirname(__file__))):

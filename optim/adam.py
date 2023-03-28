@@ -24,8 +24,8 @@ class Adam(Optimizer):
     analogous to torch.optim.AdamW from PyTorch.
     """
 
-    def __init__(self, cfg: Namespace, params):
-        super().__init__(cfg)
+    def __init__(self, cfg: Namespace, params, **kwargs):
+        super().__init__(cfg, **kwargs)
         self._optimizer = Adam(params, **self.optimizer_config)
     
     @property
@@ -97,7 +97,7 @@ class Adam(torch.optim.Optimizer):
     
     @property
     def supports_memory_efficient_fp16(self):
-        return True
+        return False
     
     @property
     def supports_flat_params(self):

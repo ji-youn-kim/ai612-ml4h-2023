@@ -13,7 +13,7 @@ from torch.optim import optimizer
 import utils
 
 class Optimizer(object):
-    def __init__(self, cfg):
+    def __init__(self, cfg, **kwargs):
         super().__init__()
         self.cfg = cfg
 
@@ -110,18 +110,9 @@ class Optimizer(object):
 
     def step(self, closure = None, scale = 1.0, groups = None):
         """Performs a single optimization step."""
-        if self.supports_step_with_scale:
-            if self.supports_groups:
-                self.optimizer.step(closure, scale = scale, groups = groups)
-            else:
-                self.optimizer.step(closure, scale = scale)
-        else:
-            if scale != 1.0:
-                self.muiltiply_grads(1.0 / scale)
-            if self.supports_groups:
-                self.optimizer.step(closure, groups = groups)
-            else:
-                self.optimizer.step(closure)
+        if scale != 1.0:
+            self.muiltiply_grads(1.0 / scale)
+        self.optimizer.step(closure)
 
     def zero_grad(self):
         """Clears the gradients of all optimized parameters."""

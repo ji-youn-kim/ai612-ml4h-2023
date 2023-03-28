@@ -17,7 +17,7 @@ from argparse import Namespace
 ) = setup_registry("--dataset", base_class=BaseDataset, required=True)
 
 def build_dataset(args: Namespace):
-    return build_dataset_(**vars(args))
+    return build_dataset_(args)
 
 # automatically import any Python files in the criterions/ directory
 for file in sorted(os.listdir(os.path.dirname(__file__))):

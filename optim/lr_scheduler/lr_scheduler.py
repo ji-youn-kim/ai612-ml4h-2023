@@ -12,7 +12,7 @@ from argparse import Namespace
 from optim import Optimizer
 
 class LRScheduler(object):
-    def __init__(self, cfg, optimizer):
+    def __init__(self, cfg, optimizer, **kwargs):
         super().__init__()
         if optimizer is not None and not isinstance(optimizer, Optimizer):
             raise ValueError("optimizer must be an instance of Optimizer")
