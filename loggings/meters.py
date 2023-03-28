@@ -133,37 +133,61 @@ class AUCMeter(Meter):
         self.scores = []
         self.targets = []
         self.classes = []
-    
-    def update(self, prob, target, cls=[]):
+        
+        self.multiclass_scores = {}
+        self.multiclass_targets = {}
+        self.multiclass_classes = []
+
+    def update(self, prob, target, cls=[], multiclass=False):
         if torch.is_tensor(prob):
             prob = prob.cpu().numpy()
         if torch.is_tensor(target):
             target = target.cpu().numpy()
 
-        self.scores.append(prob)
-        self.targets.append(target)
-        # when averaging by macro
-        if len(cls) > 0:
-            if torch.is_tensor(cls):
-                cls = cls.cpu().numpy()
-            self.classes.append(cls)
+        if multiclass:
+            assert isinstance(cls, int), (
+                f"you should explicitly pass integer value for 'cls'. cls: {cls}"
+            )
+            if cls not in self.multiclass_classes:
+                self.multiclass_classes.append(cls)
+                self.multiclass_scores[cls] = []
+                self.multiclass_targets[cls] = []
+
+            self.multiclass_scores[cls].append(prob)
+            self.multiclass_targets[cls].append(target)
+        else:
+            self.scores.append(prob)
+            self.targets.append(target)
+            # when averaging by macro
+            if len(cls) > 0:
+                if torch.is_tensor(cls):
+                    cls = cls.cpu().numpy()
+                self.classes.append(cls)
 
     def state_dict(self):
         return {
             "scores": self.scores,
             "targets": self.targets,
+            "classes": self.classes,
+            "multiclass_scores": self.multiclass_scores,
+            "multiclass_targets": self.multiclass_targets,
+            "multiclass_classes": self.multiclass_classes
         }
-    
+
     def load_state_dict(self, state_dict):
         self.scores = state_dict["scores"]
         self.targets = state_dict["targets"]
+        self.classes = state_dict["classes"]
+        self.multiclass_scores = state_dict["multiclass_scores"]
+        self.multiclass_targets = state_dict["multiclass_targets"]
+        self.multiclass_classes = state_dict["multiclass_classes"]
         self.round = state_dict.get("round", None)
 
     @property
     def auroc(self):
         y_true = np.concatenate(self.targets)
         y_score = np.concatenate(self.scores)
-        if len(self.classes) > 0:
+        if len(self.classes) > 0 or len(self.multiclass_classes) > 0:
             y_class = np.concatenate(self.classes)
             classes = np.unique(y_class)
             y_true_per_class = {c: [] for c in classes}
@@ -176,6 +200,13 @@ class AUCMeter(Meter):
                 if len(np.unique(y_true_per_class[c])) == 1:
                     continue
                 res.append(roc_auc_score(y_true=y_true_per_class[c], y_score=y_score_per_class[c]))
+
+            for c in self.multiclass_classes:
+                y_true = np.concatenate(self.multiclass_targets[c])
+                y_score = np.concatenate(self.multiclass_scores[c])
+                res.append(
+                    roc_auc_score(y_true=y_true, y_score=y_score, multi_class="ovo", average="macro")
+                )
 
             res = np.mean(res)
 

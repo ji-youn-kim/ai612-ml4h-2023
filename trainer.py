@@ -3,8 +3,9 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-import contextlib
 import time
+import math
+import warnings
 import logging
 from typing import List, Dict, Any
 from itertools import chain
@@ -48,11 +49,42 @@ class Trainer(object):
         if train is not None:
             if args.valid_percent > 0:
                 train_percent = 1 - args.valid_percent
-                dataset, valid_dataset = random_split(train, [train_percent, args.valid_percent])
+
+                subset_lengths: List[int] = []
+                for i, frac in enumerate([train_percent, args.valid_percent]):
+                    if frac < 0 or frac > 1:
+                        raise ValueError(f"Fraction at index {i} is not between 0 and 1")
+                    n_items_in_split = int(
+                        math.floor(len(train) * frac)  # type: ignore[arg-type]
+                    )
+                    subset_lengths.append(n_items_in_split)
+                remainder = len(train) - sum(subset_lengths)  # type: ignore[arg-type]
+                # add 1 to all the lengths in round-robin fashion until the remainder is 0
+                for i in range(remainder):
+                    idx_to_add_at = i % len(subset_lengths)
+                    subset_lengths[idx_to_add_at] += 1
+                lengths = subset_lengths
+                for i, length in enumerate(lengths):
+                    if length == 0:
+                        warnings.warn(f"Length of split at index {i} is 0. "
+                                    f"This might result in an empty dataset.")
+
+                dataset, valid_dataset = random_split(train, lengths)
             else:
                 dataset = train
         elif test is not None:
             dataset = test
+
+        collator = dataset.collator if valid_dataset is None else dataset.dataset.collator
+
+        dummy_to_invoke_collator = [{"dummy": "dummy"}]
+        try:
+            collator(dummy_to_invoke_collator)
+            use_collator = True
+        except NotImplementedError:
+            use_collator = False
+        except Exception:
+            use_collator = True
 
         self.iterator = DataLoader(
             dataset=dataset,
@@ -62,7 +94,8 @@ class Trainer(object):
                 DistributedSampler(dataset)
             ) if distributed_utils.get_data_parallel_world_size() > 1 else None,
             num_workers=args.num_workers,
-            pin_memory=args.pin_memory
+            pin_memory=args.pin_memory,
+            collate_fn=collator if use_collator else None
         )
         self.valid_iterator = None
         if valid_dataset is not None:
@@ -74,7 +107,8 @@ class Trainer(object):
                     DistributedSampler(valid_dataset)
                 ) if distributed_utils.get_data_parallel_world_size() > 1 else None,
                 num_workers=args.num_workers,
-                pin_memory=args.pin_memory
+                pin_memory=args.pin_memory,
+                collate_fn=collator if use_collator else None
             )
 
         self.cuda = torch.cuda.is_available()
@@ -207,7 +241,6 @@ class Trainer(object):
                 chain(self.model.parameters(), self.criterion.parameters())
             )
         )
-        
         self._optimizer = optim.build_optimizer(self.args, params)
         
         # we should initialize the learning rate scheduler immediately after
@@ -236,10 +269,14 @@ class Trainer(object):
                     "num_updates": self.get_num_updates()
                 }
             ],
+            "extra_state": {
+                "previous_training_time": self.cumulative_training_time()
+            }
         }
         
         if not self.args.no_save_optimizer_state:
             state_dict["last_optimizer_state"] = self.optimizer.state_dict()
+        return state_dict
     
     def save_checkpoint(self, filename, extra_state):
         """Save all training state in a checkpoint file."""
@@ -369,6 +406,17 @@ class Trainer(object):
         # prefer updating the LR based on the number of steps
         return self.lr_step_update()
 
+    def lr_step_update(self):
+        """Update the learning rate after each update."""
+        new_lr = self.lr_scheduler.step_update(self.get_num_updates())
+        if isinstance(new_lr, dict):
+            for k, v in new_lr.items():
+                metrics.log_scalar(f"lr_{k}", v, weight = 0, priority=300)
+            new_lr = new_lr.get("default", next(iter(new_lr.values())))
+        else:
+            metrics.log_scalar("lr", new_lr, weight = 0, priority = 300)
+        return new_lr
+
     def get_model(self):
         """Get the (non-wrapped) model instance."""
         return self._model
@@ -382,7 +430,7 @@ class Trainer(object):
         return self.optimizer.get_lr()
 
     @metrics.aggregate("train")
-    def train_step(self, samples):
+    def train_step(self, sample):
         """Do forward, backward and parameter update."""
         self._set_seed()
         self.model.train()
@@ -392,48 +440,28 @@ class Trainer(object):
         self.state_dict()
         
         metrics.log_start_time("train_wall", priority=800, round=0)
-        
-        # forward and backward pass
-        logging_outputs, sample_size = [], 0
-        for i, sample in enumerate(samples):
-            sample = self._prepare_sample(sample)
-            
-            def maybe_no_sync():
-                """
-                Whenever *samples* contains more than one mini-batch, we
-                want to accumulate gradients locally and only call
-                all-reduce in the last backwards pass.
-                """
-                if (
-                    self.data_parallel_world_size > 1
-                    and hasattr(self.model, "no_sync")
-                    and i < len(samples) - 1
-                ):
-                    return self.model.no_sync()
-                else:
-                    return contextlib.ExitStack()
 
-            with maybe_no_sync():
-                self.model.set_num_updates(self.get_num_updates())
-                with torch.autograd.profiler.record_function("forward"):
-                    loss, sample_size_i, logging_output = self.criterion(self.model, sample)
-                with torch.autograd.profiler.record_function("backward"):
-                    self.optimizer.backward(loss)
-                del loss
-            
-            logging_outputs.append(logging_output)
-            sample_size += sample_size_i
-            
-            # emptying the CUDA cache after the first step can
-            # reduce the chance of OOM
-            if self.cuda and self.get_num_updates() == 0:
-                torch.cuda.empty_cache()
+        # forward and backward pass
+        sample = self._prepare_sample(sample)
+
+        self.model.set_num_updates(self.get_num_updates())
+        with torch.autograd.profiler.record_function("forward"):
+            loss, sample_size, logging_output = self.criterion(self.model, sample)
+        with torch.autograd.profiler.record_function("backward"):
+            self.optimizer.backward(loss)
+        del loss
+        
+        # emptying the CUDA cache after the first step can
+        # reduce the chance of OOM
+        if self.cuda and self.get_num_updates() == 0:
+            torch.cuda.empty_cache()
 
         if torch.is_tensor(sample_size):
             sample_size = sample_size.float()
         else:
             sample_size = float(sample_size)
 
+        logging_outputs = [logging_output]
         # gather logging outputs from all replicas
         if self._sync_stats():
             train_time = self._local_cumulative_training_time()
@@ -565,6 +593,22 @@ class Trainer(object):
         self._num_updates = num_updates
         self.lr_step_update()
         metrics.log_scalar("num_updates", self._num_updates, weight=0, priority=200)
+
+    def clip_grad_norm(self, clip_norm):        
+        return self.optimizer.clip_grad_norm(
+            clip_norm, aggregate_norm_fn=None
+        )
+
+    def cumulative_training_time(self):
+        if self._cumulative_training_time is None:
+            # single GPU
+            return self._local_cumulative_training_time()
+        else:
+            return self._cumulative_training_time
+
+    def _local_cumulative_training_time(self):
+        """Aggregate training time in seconds."""
+        return time.time() - self._start_time + self._previous_training_time
 
     def _sync_stats(self):
         # Return True if it's using multiple GPUs and DDP

@@ -60,10 +60,17 @@ def get_parser():
 
     # optimizer
     parser.add_argument(
+        "--optimizer",
+        type=str,
+        default="adam",
+        help="optimizer name"
+    )
+    parser.add_argument(
         "--lr",
-        type=float,
-        default=0.005,
-        help="learning rate"
+        type=str,
+        default="[0.005]",
+        help="string describing learning rate for the first N epochs in the form of a python list; "
+        + "all epochs > N using lr[N-1]"
     )
     parser.add_argument(
         "--batch_size",
@@ -99,6 +106,12 @@ def get_parser():
     )
 
     # fixed lr scheduler
+    parser.add_argument(
+        "--lr-scheduler",
+        type=str,
+        default="fixed",
+        help="lr scheduler name"
+    )
     parser.add_argument(
         "--force_anneal",
         type=int,
@@ -284,7 +297,9 @@ def main(args: argparse.Namespace) -> None:
     
     if distributed_utils.is_master(args):
         checkpoint_utils.verify_checkpoint_directory(args.save_dir)
-    
+
+    args.lr = eval(args.lr)
+
     # Print args
     logger.info(args)
     
@@ -301,7 +316,6 @@ def main(args: argparse.Namespace) -> None:
 
     trainer = Trainer(args, model, criterion, train=dataset)
 
-    breakpoint()
     logger.info(
         "training on {} devices (GPUs)".format(
             args.distributed_world_size
@@ -315,9 +329,11 @@ def main(args: argparse.Namespace) -> None:
     epoch_idx = 1
     while epoch_idx <= max_epoch:
         # train for one epoch
-        valid_losses = train(args, trainer, epoch_idx)
+        valid_loss = train(args, trainer, epoch_idx)
 
-        lr = trainer.lr_step(epoch_idx, valid_losses[0])
+        lr = trainer.lr_step(epoch_idx, valid_loss)
+        
+        epoch_idx += 1
     
     train_meter.stop()
     logger.info("done training in {:.1f} seconds".format(train_meter.sum))
@@ -353,40 +369,45 @@ def train(
 
     trainer.begin_epoch(epoch)
 
+    valid_loss = None
     num_updates = trainer.get_num_updates()
     logger.info("Start iterating over samples")
-    for i, samples in enumerate(progress):
+    for i, sample in enumerate(progress):
         with metrics.aggregate("train_inner"), torch.autograd.profiler.record_function(
             "train_step-%d" % i
         ):
-            log_output = trainer.train_step(samples)
-        
+            log_output = trainer.train_step(sample)
         if log_output is not None: # not OOM, overflow, ...
             # log mid-epoch stats
             num_updates = trainer.get_num_updates()
             if num_updates % args.log_interval == 0:
                 stats = get_training_stats(metrics.get_smoothed_values("train_inner"))
-                progress.log(stats, tag = "train_inner", step = num_updates)
+                progress.log(stats, tag="train_inner", step=num_updates)
 
                 # reset mid-epoch stats after each log interval
                 # the end-of-epoch stats will still be preserved
                 metrics.reset_meters("train_inner")
-            
-            valid_loss = validate(
-                args, trainer, epoch
-            )
-            
-            checkpoint_utils.save_checkpoint(
-                args, trainer, epoch, valid_loss
-            )
-            if torch.distributed.is_initialized():
-                torch.distributed.barrier()
+
+    if trainer.valid_iterator is not None:
+        valid_loss = validate(
+            args, trainer, epoch
+        )
+
+    checkpoint_utils.save_checkpoint(
+        args, trainer, epoch, valid_loss
+    )
+    if torch.distributed.is_initialized():
+        torch.distributed.barrier()
 
     # log end-of-epoch stats
     logger.info("end of epoch {} (average epoch stats below)".format(epoch))
     stats = get_training_stats(metrics.get_smoothed_values("train"))
+
+    stats["auroc"] = metrics.get_meter("train", "_auc").auroc
+    stats["auprc"] = metrics.get_meter("train", "_auc").auprc
+
     progress.print(stats, tag="train", step=num_updates)
-    
+
     # reset epoch-level meters
     metrics.reset_meters("train")
     return valid_loss
@@ -403,7 +424,7 @@ def validate(
     """Evaluate the model on the validation set and return the losses"""
     
     trainer.begin_valid_epoch(epoch)
-    logger.info('begin validation on "{:.1f}-validation" subset'.format(args.valid_percent))
+    logger.info('begin validation on "{0:.0%} validation" subset'.format(args.valid_percent))
 
     progress = progress_bar.progress_bar(
         trainer.valid_iterator,
@@ -452,18 +473,6 @@ def get_valid_stats(
     stats: Dict[str, Any]
 ) -> Dict[str, Any]:
     stats["num_updates"] = trainer.get_num_updates()
-
-    if not hasattr(get_valid_stats, "best"):
-        get_valid_stats.best = 0
-
-    prev_best = getattr(get_valid_stats, "best")
-    best_function = max
-    get_valid_stats.best = best_function(
-        stats["auroc"], prev_best
-    )
-    
-    key = "best_auroc"
-    stats[key] = get_valid_stats.best
 
     return stats
 

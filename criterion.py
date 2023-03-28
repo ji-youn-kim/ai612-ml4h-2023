@@ -57,46 +57,67 @@ class MultiTaskCriterion(_Loss):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        net_output = model(**sample["net_input"])
+        net_output = model(**sample)
         
-        logits = model.get_logits(net_output).float() # (batch, 29, dim)
-        target = model.get_targets(sample) # (batch, 29,)
+        logits = model.get_logits(net_output).float() # (batch, 52)
+        target = model.get_targets(sample) # (batch, 28)
 
-        assert logits.dim() == 3 and target.dim() == 2
+        assert logits.dim() == 2 and target.dim() == 2
 
-        reduction = "none" if not reduce else "sum"
+        reduction = "none" if not reduce else "mean"
+        sample_size = 1
 
-        target_idx = torch.where(target != -1)
-        logits = logits[target_idx]
-        target = target[target_idx]
-        probs = torch.sigmoid(logits)
-        
-        loss = F.binary_cross_entropy(
-            inputs=probs,
-            target=target,
+        idx = 22
+        binary_target = target[:, :idx]
+        binary_logits = logits[:, :idx]
+
+        loss = F.binary_cross_entropy_with_logits(
+            binary_logits,
+            binary_target.float(),
             reduction=reduction
         )
 
-        sample_size = len(target)
+        num_classes = [6, 6, 5, 5, 5, 3]
+        for i, num_class in enumerate(num_classes, start=idx):
+            multi_class_target = target[:, i]
+            multi_class_logits = logits[:, idx: idx + num_class]
+            loss += F.cross_entropy(
+                input=multi_class_logits,
+                target=multi_class_target,
+                reduction=reduction,
+                ignore_index=-1
+            )
+            idx += num_class
 
         logging_output = {
             "loss": loss.item() if reduce else loss.detach(),
-            "batch_size": len(sample),
+            "batch_size": len(target),
             "sample_size": sample_size
         }
 
         with torch.no_grad():
-            y_class = [x.item() for x in target_idx[1]]
-            y_true = target.cpu().numpy()
-            y_score = probs.cpu().numpy()
-            print(len(y_class))
-            print(y_true.shape)
-            print(y_score.shape)            
-            breakpoint()
+            idx = 22
 
-            logging_output["_y_true"] = y_true
-            logging_output["_y_score"] = y_score
-            logging_output["_y_class"] = y_class
+            y_class = np.array(sum([[i for _ in range(len(target))] for i in range(idx)], []))
+            y_true = target.T[:idx].flatten().cpu().numpy()
+            y_score = torch.sigmoid(logits).T[:idx].flatten().cpu().numpy()
+
+            logging_output["binary_y_true"] = y_true
+            logging_output["binary_y_score"] = y_score
+            logging_output["binary_y_class"] = y_class
+
+            for i, num_class in enumerate(num_classes, start=idx):
+                y_true = target[:, i].cpu().numpy()
+                multiclass_logits = logits[:, idx: idx + num_class]
+                multiclass_y_score = torch.softmax(multiclass_logits, dim=-1).cpu().numpy()
+
+                activated_idx = np.where(y_true != -1)
+                y_true = y_true[activated_idx]
+                multiclass_y_score = multiclass_y_score[activated_idx]
+                logging_output[f"multiclass_y_true_{i}"] = y_true
+                logging_output[f"multiclass_y_score_{i}"] = multiclass_y_score
+
+                idx += num_class
 
         return loss, sample_size, logging_output
 
@@ -118,9 +139,44 @@ class MultiTaskCriterion(_Loss):
 
         metrics.log_scalar("batch_size", batch_size)
 
-        if "_y_true" in logging_outputs[0] and "_y_score" in logging_outputs[0]:
-            y_true = np.concatenate([log["_y_true"] for log in logging_outputs if "_y_true" in log])
-            y_score = np.concatenate([log["_y_score"] for log in logging_outputs if "_y_score" in log])
-            y_class = np.concatenate([log["_y_class"] for log in logging_outputs if "_y_class" in log])
+        if "binary_y_true" in logging_outputs[0] and "binary_y_score" in logging_outputs[0]:
+            y_true = np.concatenate(
+                [log["binary_y_true"] for log in logging_outputs if "binary_y_true" in log]
+            )
+            y_score = np.concatenate(
+                [log["binary_y_score"] for log in logging_outputs if "binary_y_score" in log]
+            )
+            y_class = np.concatenate(
+                [log["binary_y_class"] for log in logging_outputs if "binary_y_class" in log]
+            )
             
             metrics.log_custom(meters.AUCMeter, "_auc", y_score, y_true, y_class)
+
+        builtin_keys = {
+            "loss",
+            "batch_size",
+            "sample_size",
+            "binary_y_true",
+            "binary_y_score"
+            "binary_y_class"
+        }
+
+        for k in logging_outputs[0]:
+            if k not in builtin_keys:
+                if k.startswith("multiclass"):
+                    y_true = np.concatenate(
+                        [
+                            log["multiclass_y_true_" + k[-2:]] for log in logging_outputs
+                            if "multiclass_y_true_" + k[-2:] in log
+                        ]
+                    )
+                    y_score = np.concatenate(
+                        [
+                            log["multiclass_y_score_" + k[-2:]] for log in logging_outputs
+                            if "multiclass_y_score_" + k[-2:] in log
+                        ]
+                    )
+                    builtin_keys.add("multiclass_y_true_" + k[-2:])
+                    builtin_keys.add("multiclass_y_score_" + k[-2:])
+                    
+                    metrics.log_custom(meters.AUCMeter, "_auc", y_score, y_true, cls=int(k[-2:]), multiclass=True)

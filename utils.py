@@ -28,9 +28,8 @@ def setup_registry(registry_name: str, base_class=None, default=None, required=F
         "registry" : REGISTRY,
         "default" : default,
     }
-    def build_x(*extra_args, **kwargs):
-        choice = kwargs.get(registry_name, None)
-
+    def build_x(args, *extra_args, **extra_kwargs):
+        choice = getattr(args, registry_name, None)
         if choice is None:
             if required:
                 raise ValueError("{} is required!".format(registry_name))
@@ -41,8 +40,8 @@ def setup_registry(registry_name: str, base_class=None, default=None, required=F
             builder = getattr(cls, "build_" + registry_name)
         else:
             builder = cls
-
-        return builder(*extra_args, **kwargs)
+        
+        return builder(args, *extra_args, **extra_kwargs)
 
     def register_x(name):
         def register_x_cls(cls):
@@ -178,3 +177,42 @@ def move_to_cpu(sample):
             tensor = tensor.to(dtype=torch.float32)
         return tensor.cpu()
     return apply_to_sample(_move_to_cpu, sample)
+
+@torch.no_grad()
+def clip_grad_norm_(params, max_norm, aggregate_norm_fn=None) -> torch.Tensor:
+    def grad_exists(p):
+        return p is not None and getattr(p, "grad", None) is not None
+    
+    if isinstance(params, torch.Tensor):
+        params = [params]
+    params = list(params)
+    grads = [
+        p.grad.detach() for p in params if grad_exists(p) and not hasattr(p, "expert")
+    ]
+    expert_grads = [
+        p.grad.detach() for p in params if grad_exists(p) and hasattr(p, "expert")
+    ]
+
+    if len(grads) == 1:
+        total_norm = torch.norm(grads[0], p = 2, dtype = torch.float32)
+    else:
+        if torch.cuda.is_available:
+            device = torch.cuda.current_device()
+        else:
+            device = torch.device("cpu")
+        total_norm = torch.norm(
+            torch.stack(
+                [torch.norm(g, p = 2, dtype = torch.float32).to(device) for g in grads]
+            )
+        )
+    
+    if aggregate_norm_fn is not None:
+        total_norm = aggregate_norm_fn(total_norm)
+    
+    if max_norm > 0:
+        max_norm = float(max_norm)
+        clip_coef = (max_norm / (total_norm + 1e-6)).clamp_(max = 1)
+        for g in grads + expert_grads:
+            g.mul_(clip_coef)
+    
+    return total_norm
