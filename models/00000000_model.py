@@ -44,7 +44,22 @@ class MyModel00000000(BaseModel):
     def forward(
         self,
         # ...,
-        data,
         **kwargs
     ):
+        """
+        Note:
+            the key should be corresponded with the output dictionary of the dataset you implemented.
+        
+        Example:
+            class MyDataset(...):
+                ...
+                def __getitem__(self, index):
+                    (...)
+                    return {"data_key": data, "label": label}
+            
+            class MyModel(...):
+                ...
+                def forward(self, data_key, **kwargs):
+                    (...)
+        """
         ...
