@@ -2,7 +2,7 @@
 
 This repository is for the training framework to support AI612 Project 2, Multi-task Multi-source Learning.
 
-## Objective
+### Objective
 Given ICU records of 12 hours since the ICU admission, perform 28 prediction tasks, for three datasets. The tasks are:
 * Mortality prediction (short, long)
 * Readmission prediction
