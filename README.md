@@ -63,7 +63,7 @@ When you unzip the compressed data file that we provided you, the file structure
         * Dumped input features to your model
     * Run command
         ```shell script
-        $ python preprocess/00000000_preprocess.py ~/train/ --dest output/
+        $ python preprocess/00000000_preprocess.py /path/to/train/ --dest /path/to/output/
         ```
     * Notes
         * This script should dump processed features to the `--dest` directory
@@ -111,7 +111,7 @@ If you want to control some hyperparameters such as learning rate or batch size,
 
 After you run the experiments, the framework will automatically make directories and output the model checkpoints at the latest epoch for every `--save_interval` as well as other stuffs such as training logs or configurations.
 ```shell script
-~/ai612-project-2023
+/path/to/ai612-project-2023
 ├─ ...
 └─ outputs
    └─ $date
