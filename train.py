@@ -274,16 +274,16 @@ def get_parser():
 
     # wandb logging
     parser.add_argument(
-        "--wandb_project",
-        type=str,
-        default=None,
-        help="wandb project name"
-    )
-    parser.add_argument(
         "--wandb_entity",
         type=str,
         default=None,
-        help="wandb entity name"
+        help="Weights and Biases entity(team) name to use for logging"
+    )
+    parser.add_argument(
+        "--wandb_project",
+        type=str,
+        default=None,
+        help="Weights and Biases project name to use for logging"
     )
     
     return parser
@@ -393,9 +393,10 @@ def train(
             args, trainer, epoch
         )
 
-    checkpoint_utils.save_checkpoint(
-        args, trainer, epoch, valid_loss
-    )
+    if epoch % args.save_interval == 0:
+        checkpoint_utils.save_checkpoint(
+            args, trainer, epoch, valid_loss
+        )
     if torch.distributed.is_initialized():
         torch.distributed.barrier()
 
@@ -476,9 +477,62 @@ def get_valid_stats(
 
     return stats
 
+def set_struct(args):
+    from datetime import datetime
+    from pytz import timezone
+    
+    now = datetime.now()
+    now = now.astimezone(timezone("Asia/Seoul"))
+    
+    root = os.path.abspath(
+        os.path.dirname(__file__)
+    )
+        
+    output_dir = os.path.join(
+        root, "outputs", now.strftime("%Y-%m-%d"), now.strftime("%H-%M-%S")
+    )
+    
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    os.chdir(output_dir)
+    
+    job_logging_cfg = {
+        "version": 1,
+        "formatters": {
+            "simple": {
+                "format": "[%(asctime)s][%(name)s][%(levelname)s] - %(message)s"
+            }
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler", "formatter": "simple", "stream": "ext://sys.stdout"
+            },
+            "file": {
+                "class": "logging.FileHandler", "formatter": "simple", "filename": "train.log"
+            }
+        },
+        "root": {
+            "level": "INFO", "handlers": ["console", "file"]
+        },
+        "disable_existing_loggers": False
+    }
+    logging.config.dictConfig(job_logging_cfg)
+    
+    cfg_dir = ".config"
+    os.mkdir(cfg_dir)
+    os.mkdir(args.save_dir)
+    
+    with open(os.path.join(cfg_dir, "config.yaml"), "w") as f:
+        for k, v in vars(args).items():
+            print("{}: {}".format(k, v), file=f)
+
 def cli_main() -> None:
     parser = get_parser()
     args = parser.parse_args()
+
+    set_struct(args)
+
     distributed_utils.call_main(args, main)
 
 if __name__ == "__main__":
