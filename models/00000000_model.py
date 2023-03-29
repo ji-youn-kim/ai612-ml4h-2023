@@ -5,8 +5,9 @@ from . import BaseModel, register_model
 @register_model("00000000_model")
 class MyModel00000000(BaseModel):
     """
-    TODO: create your own model here to handle heterogeneous EHR formats.
-    Rename the class name and the file name with your student number
+    TODO:
+        create your own model here to handle heterogeneous EHR formats.
+        Rename the class name and the file name with your student number.
     
     Example:
     - 20218078_model.py
@@ -35,7 +36,7 @@ class MyModel00000000(BaseModel):
         """get targets from the sample
         
         Note:
-            Assure that get_targets(...) should return the gound truth labels
+            Assure that get_targets(...) should return the ground truth labels
                 in the shape of (batch, 28)
         """
         ...

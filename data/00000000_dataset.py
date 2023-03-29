@@ -3,8 +3,9 @@ from . import BaseDataset, register_dataset
 @register_dataset("00000000_dataset")
 class MyDataset00000000(BaseDataset):
     """
-    TODO: create your own dataset here.
-    Rename the class name and the file name with your student number
+    TODO:
+        create your own dataset here.
+        Rename the class name and the file name with your student number
     
     Example:
     - 20218078_dataset.py
@@ -25,11 +26,21 @@ class MyDataset00000000(BaseDataset):
     def __getitem__(self, index):
         """
         Note:
-            You must return a dictionary here or in collator.
+            You must return a dictionary here or in collator so that the data loader iterator
+            yields samples in the form of python dictionary. For the model inputs, the key should
+            match with the argument of the model's forward() method.
             Example:
-                def __getitem__(self, index):
-                    (...)
-                    return {"data": data, "label": label}
+                class MyDataset(...):
+                    ...
+                    def __getitem__(self, index):
+                        (...)
+                        return {"data_key": data, "label": label}
+                
+                class MyModel(...):
+                    ...
+                    def forward(self, data_key, **kwargs):
+                        (...)
+                
         """
         ...
     
