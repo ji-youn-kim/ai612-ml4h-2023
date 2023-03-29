@@ -51,6 +51,15 @@ When you unzip the compressed data file that we provided you, the file structure
 ```
 * csv files in each EHR (mimiciii, mimiciv and eicu) are the EHR tables where ICU ids (`ICUSTAY_ID`, `stay_id`, `patientunitstayid`) are anonymized and events are truncated within 12 hours since the ICU admission.
 * Each label csv file (mimiciii_labels.csv, mimiciv_labels.csv, eicu_labels.csv) provides labels of 28 tasks in the form of string describing python list for each corresponding ICU id. 
+    * You may use `eval()` to evaluate the string expression to convert it into the python list. For example,
+    ```python
+    >>> label = "[0, 1, 0, 0, 1]"
+    >>> label = eval(label)
+    >>> label
+    [0, 1, 0, 0, 1]
+    >>> type(label)
+    <class 'list'>
+    ```
 
 ### What you need to implement are as follows:
 * [preprocess/00000000_preprocess.py](preprocess/00000000_preprocess.py)
@@ -161,7 +170,7 @@ We provide basic functionalities to support your training.
 
 ### Distributed training
 * We support distributed data parallel training in our framework.
-* If you want to run the experiments with multiple GPUs, set the `--distributed_world_size` as the number of GPUs that you want to distribute (should be less than the total number of GPUs in you station)
+* If you want to run the experiments with multiple GPUs, set the `--distributed_world_size` as the number of GPUs that you want to distribute (should be less than the total number of GPUs in your station)
 
 ### Logging with WandB
 * We also provide logging with WandB.
