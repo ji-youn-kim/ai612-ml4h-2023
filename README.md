@@ -138,7 +138,7 @@ When you submit the model parameters, please submit one of these auto-generated 
 * `requirements.txt`
     * You can make this file for dependencies using this command
         ```shell script
-        $ pip freeze > requirements.txt`
+        $ pip freeze > requirements.txt
         ```
 * `{student_id}_preprocess.py`
     * Your implementation codes for feature pre-processing
@@ -147,7 +147,7 @@ When you submit the model parameters, please submit one of these auto-generated 
 * `{student_id}_model.py`
     * Your implementation codes for model
 * `{student_id}_checkpoint.pt`
-    * The auto-generated checkpoint
+    * The auto-generated model checkpoint
 
 # Features
 We provide basic functionalities to support your training.
