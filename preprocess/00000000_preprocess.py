@@ -340,14 +340,7 @@ def preprocess_mimiciii(root_dir, dest_dir):
         
         icu_stay_info[icustay_id]['events'] = sorted(icu_stay_info[icustay_id]['events'], key=lambda x: x[0])
 
-        pre_datetime=None
         for curr_datetime, event in icu_stay_info[icustay_id]['events']:
-            if pre_datetime == None:
-                pre_datetime = curr_datetime
-            else:
-                if pre_datetime > curr_datetime:
-                    print(pre_datetime, curr_datetime)
-                pre_datetime=curr_datetime
             seq_lens.append(len(event))
             if len(event) > 128:
                 more_than_128.append(len(event))
@@ -366,8 +359,6 @@ def preprocess_mimiciii(root_dir, dest_dir):
             with open(file=os.path.join(dest_dir, f'mimiciii_{icustay_id}.pickle'), mode='wb') as f:
                 pickle.dump(icu_stay_dict, f)
 
-        #print(np.percentile(seq_lens, q=[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]))
-        #print(len(more_than_128))
 
 if __name__ == "__main__":
     parser = get_parser()
