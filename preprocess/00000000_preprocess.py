@@ -90,7 +90,7 @@ def preprocess_eicu(root_dir, dest_dir):
         return eicu_data, pid2icustayids
 
     def eicu_get_table(table_name, table_path, relevant_cols, offset_col, eicu_data):
-        df = pd.read_csv(table_path, usecols=list(relevant_cols.keys())+['patientunitstayid', offset_col])
+        df = pd.read_csv(table_path, usecols=relevant_cols+['patientunitstayid', offset_col])
 
         # 2-pass vectorized
         for col_name in relevant_cols:
@@ -137,19 +137,19 @@ def preprocess_eicu(root_dir, dest_dir):
         Table(
             table_name='intakeOutput',
             table_path=INTAKEOUTPUT_PATH,
-            relevant_cols={'intaketotal', 'outputtotal', 'dialysistotal', 'nettotal', 'cellpath', 'celllabel', 'cellvaluetext',},
+            relevant_cols=['intaketotal', 'outputtotal', 'dialysistotal', 'nettotal', 'cellpath', 'celllabel', 'cellvaluetext'],
             offset_col='intakeoutputentryoffset'
         ),
         Table(
             table_name='medication',
             table_path=MEDICATION_PATH,
-            relevant_cols={'drugivadmixture', 'drugordercancelled', 'drugname', 'drughiclseqno', 'dosage', 'routeadmin', 'frequency', 'loadingdose', 'prn', 'gtc',},
+            relevant_cols=['drugivadmixture', 'drugordercancelled', 'drugname', 'drughiclseqno', 'dosage', 'routeadmin', 'frequency', 'loadingdose', 'prn', 'gtc'],
             offset_col='drugorderoffset'
         ),
         Table(
             table_name='lab',
             table_path=LAB_PATH,
-            relevant_cols={'labtypeid','labname','labresulttext','labmeasurenameinterface',},
+            relevant_cols=['labtypeid','labname','labresulttext','labmeasurenameinterface'],
             offset_col='labresultoffset'
         ),
     ]
