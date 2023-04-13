@@ -16,7 +16,7 @@ from file_io import PathManager
 logger = logging.getLogger(__name__)
 
 def save_checkpoint(args, trainer, epoch, val_loss):
-    from fairseq_signals import meters
+    from loggings import meters
 
     # only one worker should attempt to create the required dir
     if trainer.data_parallel_rank == 0:

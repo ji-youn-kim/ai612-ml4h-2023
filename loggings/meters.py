@@ -204,9 +204,14 @@ class AUCMeter(Meter):
             for c in self.multiclass_classes:
                 y_true = np.concatenate(self.multiclass_targets[c])
                 y_score = np.concatenate(self.multiclass_scores[c])
+                ##### CODE ADDED ######
+                # res.append(
+                #     roc_auc_score(y_true=y_true, y_score=y_score, multi_class="ovr", average="micro")
+                # )
                 res.append(
-                    roc_auc_score(y_true=y_true, y_score=y_score, multi_class="ovr", average="micro")
+                    roc_auc_score(y_true=y_true, y_score=y_score, multi_class="ovr", average="macro")
                 )
+                ########################
 
             res = np.mean(res)
 

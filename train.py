@@ -521,7 +521,11 @@ def set_struct(args):
     
     cfg_dir = ".config"
     os.mkdir(cfg_dir)
-    os.mkdir(args.save_dir)
+    ##### CODE ADDED #####
+    if not os.path.exists(args.save_dir):
+        os.makedirs(args.save_dir)
+    # os.mkdir(args.save_dir)
+    ######################
     
     with open(os.path.join(cfg_dir, "config.yaml"), "w") as f:
         for k, v in vars(args).items():

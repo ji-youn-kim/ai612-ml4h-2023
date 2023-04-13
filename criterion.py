@@ -76,17 +76,29 @@ class MultiTaskCriterion(_Loss):
             binary_target.float(),
             reduction=reduction
         )
+        ##### CODE ADDED #####
+        # if loss.isnan().any():
+        #     breakpoint()
+        ######################
 
         num_classes = [6, 6, 5, 5, 5, 3]
         for i, num_class in enumerate(num_classes, start=idx):
             multi_class_target = target[:, i]
             multi_class_logits = logits[:, idx: idx + num_class]
-            loss += F.cross_entropy(
+            multi_class_loss = F.cross_entropy(
                 input=multi_class_logits,
                 target=multi_class_target,
                 reduction=reduction,
                 ignore_index=-1
             )
+            ##### CODE ADDED #####
+            if multi_class_loss.isnan().any():
+                loss += 0
+            else:
+                loss += multi_class_loss
+            # if loss.isnan().any():
+            #     breakpoint()
+            ######################
             idx += num_class
 
         logging_output = {
