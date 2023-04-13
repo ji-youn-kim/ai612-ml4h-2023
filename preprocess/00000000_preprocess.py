@@ -48,11 +48,6 @@ def main(args):
 
     preprocess_eicu(root_dir=root_dir, dest_dir=dest_dir)
 
-if __name__ == "__main__":
-    parser = get_parser()
-    args = parser.parse_args()
-    main(args)
-
 ########## eicu preprocess functions ##########
 
 def preprocess_eicu(root_dir, dest_dir):
@@ -70,7 +65,7 @@ def preprocess_eicu(root_dir, dest_dir):
                 'pid': -1,
             }
 
-        tqdm.pandas(desc='labels')
+        tqdm.pandas(desc='eicu | labels')
         df.progress_apply(map_labels, axis=1)
 
         pid2icustayids = defaultdict(set)
@@ -83,7 +78,7 @@ def preprocess_eicu(root_dir, dest_dir):
 
         df = pd.read_csv(patient_path, usecols=['patientunitstayid', 'uniquepid'])
 
-        tqdm.pandas(desc='pid')
+        tqdm.pandas(desc='eicu | pid')
         df.progress_apply(map_pid, axis=1)
 
         
@@ -164,7 +159,7 @@ def preprocess_eicu(root_dir, dest_dir):
         if len(icustay['inputs']) == 0:
             del small_eicu_data[icustay_id]
 
-    for icustay_id, icustay in tqdm(small_eicu_data.items(), desc='sort events'):
+    for icustay_id, icustay in tqdm(small_eicu_data.items(), desc='eicu | sort events'):
         pid = icustay['pid']
         events = icustay['inputs']
         sorted_events = sorted(events, key=lambda a: a['offset'])
@@ -180,13 +175,13 @@ def preprocess_eicu(root_dir, dest_dir):
 
     # val_count = 0
     # val_icustay_ids = set()
-    # for icustay_id, icustay in tqdm(small_eicu_data.items(), desc='split train/eval'):
+    # for icustay_id, icustay in tqdm(small_eicu_data.items(), desc='eicu | split train/eval'):
     #     pid = icustay['pid']
     #     if len(pid2icustayids[pid]) == 1 and val_count < val_num:
     #         val_count += 1
     #         val_icustay_ids.add(icustay_id)
 
-    for icustay_id, icustay in tqdm(small_eicu_data.items(), desc='processed data files'):
+    for icustay_id, icustay in tqdm(small_eicu_data.items(), desc='eicu | save datafiles'):
         events = icustay['inputs']
         final_icustay = {
             'labels': icustay['labels']
@@ -204,3 +199,8 @@ def preprocess_eicu(root_dir, dest_dir):
         final_icustay_path = os.path.join(dest_dir, f'eicu_{icustay_id}.pickle')
         with open(final_icustay_path, 'wb') as f:
             pickle.dump(final_icustay, f)
+
+if __name__ == "__main__":
+    parser = get_parser()
+    args = parser.parse_args()
+    main(args)
