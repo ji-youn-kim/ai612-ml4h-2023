@@ -326,7 +326,7 @@ def preprocess_mimiciii(root_dir, dest_dir):
         chunk_parallel(table_name, table_path, tokenizer)
 
     # make {inputs : [e, e, e, ...], label : [0, 1, 2, 0, ..., -1, 1, 0]}
-    mimiciii_labels = pd.read_csv(os.path.join(root_dir, "labels/mimiciii_labels.csv")
+    mimiciii_labels = pd.read_csv(os.path.join(root_dir, "labels/mimiciii_labels.csv"))
    
     seq_lens = []
     more_than_128 = []
