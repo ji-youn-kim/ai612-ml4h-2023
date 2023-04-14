@@ -213,6 +213,7 @@ def preprocess_mimiciii(root_dir, dest_dir):
     hadm_dict = {}
 
     # tokenizer
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
     tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
 
     # identification files
@@ -294,7 +295,7 @@ def preprocess_mimiciii(root_dir, dest_dir):
             t0 = time.time()
             
             if table_name=="ICUSTAYS":
-                for idx, row in chunk.iterrows():
+                for idx, row in tqdm(chunk.iterrows(), desc=table_name.lower()):
                     hadm_id, icustay_id, intime, outtime =  row["HADM_ID"], row["ICUSTAY_ID"], row['INTIME'], row["OUTTIME"]
                     
                     hadm_dict[hadm_id] = {}
@@ -307,7 +308,7 @@ def preprocess_mimiciii(root_dir, dest_dir):
             
             else:
                 chunk["TABLE_NAME"] = table_name.lower()
-                for idx, row in chunk.parallel_apply(preprocess_event , axis=1).iterrows():
+                for idx, row in tqdm(chunk.parallel_apply(preprocess_event , axis=1).iterrows(), desc=table_name.lower()):
                     hadm_id, icustay_id, charttime, tokenized_event_seq = row["HADM_ID"], row["ICUSTAY_ID"], row["CHARTTIME"], row["EVENT_SEQ"]
                     if pd.isnull(hadm_id):
                         i+=1
