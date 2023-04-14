@@ -69,7 +69,7 @@ def get_parser():
     parser.add_argument(
         "--lr",
         type=str,
-        default="[0.005]",
+        default="[1e-4]",
         help="string describing learning rate for the first N epochs in the form of a python list; "
         + "all epochs > N using lr[N-1]"
     )
