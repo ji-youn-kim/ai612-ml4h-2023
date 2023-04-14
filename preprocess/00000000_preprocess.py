@@ -213,13 +213,12 @@ def preprocess_mimiciii(root_dir, dest_dir):
     hadm_dict = {}
 
     # tokenizer
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
     tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
 
     # identification files
     data_dir_path = os.path.join(root_dir, "mimiciii/")
-    d_items = os.path.join("/home/data_storage/mimiciii-1.4", "D_ITEMS.csv")
-    d_labitems = os.path.join("/home/data_storage/mimiciii-1.4", "D_LABITEMS.csv")
+    d_items = os.path.join('/home/data_storage/mimiciii-1.4', "D_ITEMS.csv")
+    d_labitems = os.path.join('/home/data_storage/mimiciii-1.4', "D_LABITEMS.csv")
 
 
     col_names_per_table = {
@@ -295,7 +294,7 @@ def preprocess_mimiciii(root_dir, dest_dir):
             t0 = time.time()
             
             if table_name=="ICUSTAYS":
-                for idx, row in tqdm(chunk.iterrows(), desc=table_name.lower()):
+                for idx, row in chunk.iterrows():
                     hadm_id, icustay_id, intime, outtime =  row["HADM_ID"], row["ICUSTAY_ID"], row['INTIME'], row["OUTTIME"]
                     
                     hadm_dict[hadm_id] = {}
@@ -308,7 +307,7 @@ def preprocess_mimiciii(root_dir, dest_dir):
             
             else:
                 chunk["TABLE_NAME"] = table_name.lower()
-                for idx, row in tqdm(chunk.parallel_apply(preprocess_event , axis=1).iterrows(), desc=table_name.lower()):
+                for idx, row in chunk.parallel_apply(preprocess_event , axis=1).iterrows():
                     hadm_id, icustay_id, charttime, tokenized_event_seq = row["HADM_ID"], row["ICUSTAY_ID"], row["CHARTTIME"], row["EVENT_SEQ"]
                     if pd.isnull(hadm_id):
                         i+=1
