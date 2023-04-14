@@ -5,7 +5,7 @@ import pandas as pd
 from tqdm import tqdm
 import numpy as np
 import pickle
-
+import collections
 from datetime import datetime
 from collections import defaultdict
 from pandarallel import pandarallel
@@ -22,7 +22,7 @@ def get_parser():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "root",
+        "--root",
         metavar="DIR",
         help="root directory containing different ehr files to pre-process (usually, 'train/')"
     )
@@ -51,9 +51,10 @@ def main(args):
 
     preprocess_eicu(root_dir=root_dir, dest_dir=dest_dir)
     preprocess_mimiciii(root_dir=root_dir, dest_dir=dest_dir)
+    preprocess_mimiciv(root_dir=root_dir, dest_dir=dest_dir)
+
 
 ########## eicu preprocess functions ##########
-
 def preprocess_eicu(root_dir, dest_dir):
 
     def eicu_get_labels(label_path, patient_path):
@@ -204,8 +205,7 @@ def preprocess_eicu(root_dir, dest_dir):
         with open(final_icustay_path, 'wb') as f:
             pickle.dump(final_icustay, f)
 
-            
-            
+                  
 ########## mimiciii preprocess functions ##########
 def preprocess_mimiciii(root_dir, dest_dir):
     pandarallel.initialize(nb_workers=64, progress_bar=False)
@@ -358,6 +358,195 @@ def preprocess_mimiciii(root_dir, dest_dir):
             icu_stay_dict = {"input": events, "label": labels} 
             with open(file=os.path.join(dest_dir, f'mimiciii_{icustay_id}.pickle'), mode='wb') as f:
                 pickle.dump(icu_stay_dict, f)
+
+
+########## mimiciv preprocess functions ##########
+def preprocess_mimiciv(root_dir, dest_dir):
+    
+    MIMIC4_DIR = os.path.join(root_dir, 'mimiciv')
+    LABELS_PATH = os.path.join(root_dir, 'labels', 'mimiciv_labels.csv')
+    INPUTEVENT_PATH = os.path.join(MIMIC4_DIR, 'inputevents.csv')
+    PRESCRIPTION_PATH = os.path.join(MIMIC4_DIR, 'prescriptions.csv')
+    LABEVENTS_PATH = os.path.join(MIMIC4_DIR, 'labevents.csv')
+    OUTPUTEVENTS_PATH = os.path.join(MIMIC4_DIR, 'outputevents.csv')
+    D_LABITEMS_PAHT=os.path.join(MIMIC4_DIR, 'd_labitems.csv.gz')
+    D_ITEMS_PATH = os.path.join(MIMIC4_DIR, 'd_items.csv.gz')
+    
+    inputevent = pd.DataFrame(pd.read_csv(INPUTEVENT_PATH))
+    prescription = pd.DataFrame(pd.read_csv(PRESCRIPTION_PATH))
+    labevents = pd.DataFrame(pd.read_csv(LABEVENTS_PATH))
+    outputevent = pd.DataFrame(pd.read_csv(OUTPUTEVENTS_PATH))
+    d_labitems = pd.DataFrame(pd.read_csv(D_LABITEMS_PAHT, compression='gzip', sep=','))
+    d_itmes=pd.DataFrame(pd.read_csv(D_ITEMS_PATH, compression='gzip', sep=','))
+    labels = pd.DataFrame(pd.read_csv(LABELS_PATH))
+    
+    def get_labitem_name(d_labitems):
+        labitem_name =dict()
+        for idx, row in tqdm(d_labitems.iterrows()):
+            labitem_name[row['itemid']] = row['label']
+        return labitem_name
+    
+    def get_item_name(d_items):
+        item_name=dict()
+        for idx, row in tqdm(d_itmes.iterrows()):
+            item_name[row['itemid']]=row['label']
+        return item_name
+    
+    def parsing(itemid):
+        try:
+            ans= labitem_name[itemid]
+        except:
+            ans =  None
+        return ans
+    
+    def parsing2(itemid):
+        try:
+            ans= item_name[itemid]
+        except:
+            ans =  None
+        return ans
+    
+    def stay_subject_mapping(inputevent):
+        stay_hadm_dict = defaultdict(set)
+        for idx,row in tqdm(inputevent.iterrows()):
+            stay_hadm_dict[row['hadm_id']].add(row['stay_id'])
+            
+        return stay_hadm_dict
+        
+    def collect_inputevent(inputevent):
+        input_dict = defaultdict(list)
+        for idx, row in tqdm(inputevent.iterrows()):
+            input_dict[row['stay_id']].append("inputevents")
+            input_dict[row['stay_id']].append(row[['starttime','item_name', 'amount', 'amountuom', 'rate', 'rateuom', 'orderid',
+            'linkorderid', 'ordercategoryname', 'secondaryordercategoryname',
+            'ordercomponenttypedescription', 'ordercategorydescription',
+            'patientweight', 'totalamount', 'totalamountuom', 'isopenbag',
+            'continueinnextdept', 'statusdescription', 'originalamount',
+            'originalrate']])
+        
+        return input_dict
+        
+    def collect_prescription(prescription, input_dict, stay_hadm_dict):
+        prescription_input = input_dict.copy()
+        for idx,row in tqdm(prescription.iterrows()):
+            
+            stayid = str(stay_hadm_dict[row['hadm_id']])
+            prescription_input[stayid].append('prescriptions')
+            prescription_input[stayid].append(row[['starttime','pharmacy_id', 'poe_id', 'poe_seq','drug_type', 'drug', 'formulary_drug_cd',
+            'gsn', 'ndc', 'prod_strength', 'form_rx', 'dose_val_rx', 'dose_unit_rx',
+            'form_val_disp', 'form_unit_disp', 'doses_per_24_hrs', 'route']])
+            
+        return prescription_input
+    
+    
+    def collect_labinput(labevents, prescription_input, stay_hadm_dict):
+        lab_input = prescription_input.copy()
+        for idx, row in tqdm(labevents.iterrows()):
+            
+            stayid = str(stay_hadm_dict[row['hadm_id']])
+            lab_input[stayid].append('labevents')
+            lab_input[stayid].append(row[['charttime','item_name','value', 'valuenum', 'valueuom',
+            'ref_range_lower', 'ref_range_upper', 'flag', 'priority', 'comments']])
+        return lab_input
+    
+    
+    def collect_outinput(outputevent, lab_input):
+        out_input = lab_input.copy()
+        for idx, row in tqdm(outputevent.iterrows()):
+            out_input[row['stay_id']].append('outputevents')
+            out_input[row['stay_id']].append(row[['charttime','item_name','value', 'valueuom']])
+            
+        return out_input
+    
+    def concat(out_input):
+        result=[]
+        stay_id_list=[]
+        for stay_id,stay in out_input.items():
+            #time_value=dict()
+            time_value = defaultdict(list)
+            for idx,event in enumerate(stay):
+                if idx%2 ==0 : 
+                    table_name = event
+                else:
+                    short_str=[]
+                    for key,val in event.items():
+                        if key=='starttime' or key=='charttime':
+                            continue
+                        else:
+                            short_str.append(key.replace('\'',''))
+                            short_str.append(val)
+                        string = table_name+' '+' '.join(map(str,short_str))
+                    time_value[event.values[0]].append(string)
+            result.append(time_value)
+            stay_id_list.append(stay_id)
+        
+        return result, stay_id_list
+    
+    def time_sorting(result,stay_id_list):
+        final=dict()
+        for idx,stay in enumerate(result):
+            new_events = collections.OrderedDict(sorted(stay.items()))
+            #string = ''.join(map(str,new_events.values()))
+            string = list(new_events.values())
+
+            final[stay_id_list[idx]]=string
+        
+        return final
+    
+    def tokenizing(dest_dir,final, tokenizer,labels):
+        for stay_id,events in final.items():
+            print_dict ={}
+            tokens=[]
+            
+            for sentence in events:
+                sentence = ' '.join(map(str,sentence))
+                
+                token = tokenizer(sentence)['input_ids']
+                if len(token) >128:
+                    token = token[:128]
+                elif len(token) < 128:
+                    token += [0]*(128-len(token))
+                    
+                tokens.append(token)
+            try:
+                label = labels[labels.stay_id==stay_id]['labels'].values[0].strip('[]')
+                label = ''.join(map(str,label))
+                label = np.fromstring(label, dtype=int, sep=',')
+                
+                print_dict["input"] = np.array(tokens)
+                print_dict['label'] = label
+                
+                save_path = os.path.join(dest_dir, f'mimic4_{stay_id}.pkl')
+                with open(save_path, 'wb') as f:
+                    pickle.dump(print_dict,f)
+                    
+            except:
+                continue
+            
+        return 
+    
+    labitem_name = get_labitem_name(d_labitems)
+    item_name = get_item_name(d_itmes)
+    labevents['item_name'] = None
+    labevents['item_name'] = labevents.apply(lambda row: parsing(row['itemid']) ,axis=1 )
+    outputevent['item_name'] = outputevent.apply(lambda row: parsing2(row['itemid']), axis=1)
+    inputevent['item_name'] = inputevent.apply(lambda row: parsing2(row['itemid']), axis=1)
+    
+    ##collect all events by stay_id
+    print("collecting")
+    stay_hadm_dict = stay_subject_mapping(inputevent)
+    input_event = collect_inputevent(inputevent)
+    prescription_input = collect_prescription(prescription, input_event, stay_hadm_dict)
+    lab_input = collect_labinput(labevents, prescription_input, stay_hadm_dict)
+    out_input = collect_outinput(outputevent, lab_input)
+    result, stay_id_list = concat(out_input)
+    #sorting by time
+    print("sorting")
+    final = time_sorting(result,stay_id_list)
+    #tokenize
+    tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
+    print("saving")
+    tokenizing(dest_dir,final, tokenizer,labels)
 
 
 if __name__ == "__main__":
