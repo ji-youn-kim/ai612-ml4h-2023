@@ -141,20 +141,12 @@ class TransformerEventEncoder(nn.Module):
         )
         # encode_event = self.encoder(emb_event, src_key_padding_mask=pad_mask) # (B*E, S, Emb_in)
         encode_event = self.encoder(emb_event)
-        if encode_event.isnan().any():
-            breakpoint()
-        # breakpoint()
         # apply mean pooling
-        encode_event_prev = encode_event
         encode_event[pad_mask] = 0
         # breakpoint()
         pooled_event = torch.div(encode_event.sum(dim=1), (encode_event!=0).sum(dim=1)) # (B*E, Emb_in)
-        if pooled_event.isnan().any():
-            breakpoint()
 
         proj = self.proj_output(pooled_event) # (B*E, Emb_out)
-        if proj.isnan().any():
-            breakpoint()
         proj = proj.view(B, E, self.emb_out) # (B, E, Emb_out)
 
         return proj # (B, E, Emb_out)

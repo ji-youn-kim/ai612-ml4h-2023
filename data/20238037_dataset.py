@@ -37,9 +37,10 @@ class MyDataset20238037(BaseDataset):
 
         item = pd.read_pickle(os.path.join(self.data_path, self.files[index]))
         item['input'] = np.array([i for i in item['input'] if np.any(i)])
-        item['fname'] = self.files[index]
+        # item['fname'] = self.files[index]
         if 'labels' in item.keys():
-            item['labels'] = item['label']
+            item['label'] = item['labels']
+            del item['labels']
     
         return item
     
@@ -55,17 +56,15 @@ class MyDataset20238037(BaseDataset):
             return {}
         input = dict()
         input['input'] = [s['input'] for s in samples]
-        # me = [s['fname'] for s in samples]
+        target = dict()
+        target['label'] = [s['label'] for s in samples]
 
         seq_sizes, token_sizes = [], []
         for idx, s in enumerate(input['input']):
-            # if np.shape(s)[0] == 0 or np.shape(s)[1] == 0:
-            #     print("not correct")
-            #     print(me[idx])
             seq_sizes.append(np.shape(s)[0])
             token_sizes.append(np.shape(s)[1])
 
-        target_event_size = min(max(seq_sizes), self.max_event_size)-1
+        target_event_size = min(max(seq_sizes), self.max_event_size)
 
         collated_input = dict()
         for k in input.keys():
@@ -101,10 +100,11 @@ class MyDataset20238037(BaseDataset):
                         )
                     )
                 else:
-                    collated_input[k][i] = collated_input[k][i][:target_event_size] 
+                    collated_input[k][i] = torch.from_numpy(input[k][i][:target_event_size])
             
         collated_input['input'] = collated_input['input'].type(torch.int64)
         collated_input['label'] = torch.LongTensor(np.array([s['label'] for s in samples]))
+        # collated_input['fname'] = np.array([s['fname'] for s in samples])
 
         # shape: {'input': (B, E, S), 'label': (B, 28)}
         return collated_input 
