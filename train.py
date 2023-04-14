@@ -11,6 +11,7 @@ import math
 import random
 import os
 import sys
+import logging.config
 
 # We need to setup root logger before importing any project libraries.
 logging.basicConfig(
