@@ -232,7 +232,7 @@ def preprocess_mimiciii(root_dir, dest_dir):
                     "SECONDARYORDERCATEGORYNAME","ORDERCOMPONENTTYPEDESCRIPTION","ORDERCATEGORYDESCRIPTION","PATIENTWEIGHT",\
                     "TOTALAMOUNT","TOTALAMOUNTUOM","ISOPENBAG","CONTINUEINNEXTDEPT","CANCELREASON","STATUSDESCRIPTION", \
                     "COMMENTS_CANCELEDBY", "ORIGINALAMOUNT","ORIGINALRATE"],
-        "outputevents" : ["ITEMID","VALUE","VALUEUOM","STOPPED","NEWBOTTLE","ISERROR","INTIME"]
+        "outputevents" : ["ITEMID","VALUE","VALUEUOM","STOPPED","NEWBOTTLE","ISERROR"]
     }
 
 
@@ -370,8 +370,8 @@ def preprocess_mimiciv(root_dir, dest_dir):
     PRESCRIPTION_PATH = os.path.join(MIMIC4_DIR, 'prescriptions.csv')
     LABEVENTS_PATH = os.path.join(MIMIC4_DIR, 'labevents.csv')
     OUTPUTEVENTS_PATH = os.path.join(MIMIC4_DIR, 'outputevents.csv')
-    D_LABITEMS_PAHT=os.path.join('/home/data_storage/MIMIC-IV-2.0', 'd_labitems.csv.gz')
-    D_ITEMS_PATH = os.path.join('/home/data_storage/MIMIC-IV-2.0', 'd_items.csv.gz')
+    D_LABITEMS_PAHT=os.path.join(MIMIC4_DIR, 'd_labitems.csv.gz')
+    D_ITEMS_PATH = os.path.join(MIMIC4_DIR, 'd_items.csv.gz')
     
     inputevent = pd.DataFrame(pd.read_csv(INPUTEVENT_PATH))
     prescription = pd.DataFrame(pd.read_csv(PRESCRIPTION_PATH))
