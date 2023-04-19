@@ -228,9 +228,10 @@ def preprocess_eicu(root_dir, dest_dir):
                   
 ########## mimiciii preprocess functions ##########
 def preprocess_mimiciii(root_dir, dest_dir):
-    pandarallel.initialize(nb_workers=64, progress_bar=False)
+    pandarallel.initialize(nb_workers=32, progress_bar=True)
     
-    hadm_dict = {}
+    total_df = pd.DataFrame(columns=['HADM_ID', 'ICUSTAY_ID', 'CHARTTIME', 'EVENT_SEQ'])
+    hadm_icu_dict = {}
 
     # tokenizer
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -238,9 +239,12 @@ def preprocess_mimiciii(root_dir, dest_dir):
 
     # identification files
     data_dir_path = os.path.join(root_dir, "mimiciii/")
-    d_items = os.path.join(data_dir_path, "D_ITEMS.csv")
-    d_labitems = os.path.join(data_dir_path, "D_LABITEMS.csv")
+    d_items = pd.read_csv(os.path.join("/home/data_storage/mimiciii-1.4", "D_ITEMS.csv"))
+    d_labitems = pd.read_csv(os.path.join(
+        "/home/data_storage/mimiciii-1.4", "D_LABITEMS.csv"))
 
+    d_items_dict = dict(zip(d_items["ITEMID"], d_items["LABEL"]))
+    d_labitems_dict = dict(zip(d_labitems["ITEMID"], d_labitems["LABEL"]))
 
     col_names_per_table = {
         "labevents" : ["ITEMID", "VALUE", "VALUENUM", "VALUEUOM", "FLAG"],
@@ -252,61 +256,50 @@ def preprocess_mimiciii(root_dir, dest_dir):
                     "SECONDARYORDERCATEGORYNAME","ORDERCOMPONENTTYPEDESCRIPTION","ORDERCATEGORYDESCRIPTION","PATIENTWEIGHT",\
                     "TOTALAMOUNT","TOTALAMOUNTUOM","ISOPENBAG","CONTINUEINNEXTDEPT","CANCELREASON","STATUSDESCRIPTION", \
                     "COMMENTS_CANCELEDBY", "ORIGINALAMOUNT","ORIGINALRATE"],
-        "outputevents" : ["ITEMID","VALUE","VALUEUOM","STOPPED","NEWBOTTLE","ISERROR"]
+        "outputevents" : ["ITEMID","VALUE","VALUEUOM","STOPPED","NEWBOTTLE","ISERROR"],
+        "chartevents" : ["ITEMID", "VALUE", "VALUENUM", "VALUEUOM"]
     }
 
+    
+    mimiciii_top200_items = pickle.load(open("./mimiciii_top200.pkl", "rb"))  # ["mimiciii"]
 
     """Functions"""
-    def change_id_to_str(itemid, event_seq):
-        if event_seq.strip()=="labevents":
-            d_items_pd = pd.read_csv(d_labitems)
+    def apply_charttime(row):
+        table_name = row["TABLE_NAME"]
+        if table_name == "prescriptions":
+            charttime = datetime.strptime(
+                row["STARTDATE"]+" 00:00:00", "%Y-%m-%d %H:%M:%S")
+        elif table_name == "inputevents_mv":
+            charttime = datetime.strptime(
+                row["STARTTIME"], "%Y-%m-%d %H:%M:%S")
         else:
-            d_items_pd = pd.read_csv(d_items)
-        for idx, row in d_items_pd[d_items_pd["ITEMID"]==itemid].iterrows():
-            value = row["LABEL"]
-        return value
+            charttime = datetime.strptime(
+                row["CHARTTIME"], "%Y-%m-%d %H:%M:%S")
+        return charttime
+    
+    def apply_event_seq(row):
+        table_name = row["TABLE_NAME"].lower()
+        col_names = col_names_per_table[table_name]
 
-
-    def table_to_seq(row, col_names, event_seq):
+        event_seq = f"{table_name} "
+        
         for col_name in col_names:
             c_val = row[col_name]
-            c_name = col_name
-
+            c_name = col_name.lower()
+        
             if c_name=="itemid":
-                c_val = change_id_to_str(c_val, event_seq)
+                c_val = d_labitems_dict[c_val] if table_name == "labevents" else d_items_dict[c_val]
             elif c_name=="valuenum":
                 c_val = str(c_val)
 
             if not pd.isnull(c_val):
                 event_seq += f"{c_name} {c_val} "
-        return event_seq 
+
+        return  event_seq.strip() 
 
 
-    def preprocess_event(row):
-        table_name = row["TABLE_NAME"]
-        col_names = col_names_per_table[table_name]
-        
-        hadm_id = row["HADM_ID"]
-        icustay_id = row["ICUSTAY_ID"] if "ICUSTAY_ID" in row.index else list(hadm_dict[hadm_id].keys())[0]
-        
-        if table_name=="prescriptions":
-            charttime = datetime.strptime(row["STARTDATE"]+" 00:00:00", "%Y-%m-%d %H:%M:%S")
-        elif table_name=="inputevents_mv":
-            charttime = datetime.strptime(row["STARTTIME"], "%Y-%m-%d %H:%M:%S")
-        else:
-            charttime = datetime.strptime(row["CHARTTIME"], "%Y-%m-%d %H:%M:%S")
-
-
-        event_seq = f"{table_name} "
-        
-        event_seq = table_to_seq(row, col_names, event_seq)
-        tokenized_event_seq = tokenizer.encode(event_seq.strip())
-        
-        return pd.Series([hadm_id, icustay_id, charttime,  tokenized_event_seq], index=["HADM_ID", "ICUSTAY_ID", "CHARTTIME", "EVENT_SEQ"])
-
-
-    def chunk_parallel(table_name, table_path, tokenizer):
-        chunksize = 10**6
+    def chunk_parallel(table_name, table_path, total_df):
+        chunksize = 10**7
         print(table_name)
         i =0
         for cnt, chunk in enumerate(pd.read_csv(table_path, chunksize=chunksize)):
@@ -316,70 +309,66 @@ def preprocess_mimiciii(root_dir, dest_dir):
             
             if table_name=="ICUSTAYS":
                 for idx, row in tqdm(chunk.iterrows(), desc=table_name.lower()):
-                    hadm_id, icustay_id, intime, outtime =  row["HADM_ID"], row["ICUSTAY_ID"], row['INTIME'], row["OUTTIME"]
+                    hadm_id, icustay_id =  row["HADM_ID"], row["ICUSTAY_ID"]
                     
-                    hadm_dict[hadm_id] = {}
+                    hadm_icu_dict[hadm_id] = icustay_id
                     
-                    intime = datetime.strptime(intime, "%Y-%m-%d %H:%M:%S")
-                    outtime = datetime.strptime(outtime, "%Y-%m-%d %H:%M:%S")
-                    hadm_dict[hadm_id][icustay_id] = {"intime": intime, 
-                                                "outtime": outtime, 
-                                                "events": []}
-            
             else:
+                if table_name == "CHARTEVENTS":
+                    chunk = chunk[chunk["ITEMID"].isin(mimiciii_top200_items)]
+                
                 chunk["TABLE_NAME"] = table_name.lower()
-                for idx, row in tqdm(chunk.parallel_apply(preprocess_event , axis=1).iterrows(), desc=table_name.lower()):
-                    hadm_id, icustay_id, charttime, tokenized_event_seq = row["HADM_ID"], row["ICUSTAY_ID"], row["CHARTTIME"], row["EVENT_SEQ"]
-                    if pd.isnull(hadm_id):
-                        i+=1
-                        pass
-                    elif icustay_id in hadm_dict[hadm_id].keys():
-                        hadm_dict[hadm_id][icustay_id]["events"].append((charttime, tokenized_event_seq))
-            
+                chunk["CHARTTIME"] = chunk.parallel_apply(apply_charttime, axis=1, )
+                #if 'STARTTIME' in chunk.columns:
+                #    chunk.drop(['STARTTIME'], axis=1, inplace=True)
+                #print(chunk.columns)
+                if "ICUSTAY_ID" not in chunk.columns:
+                    chunk["ICUSTAY_ID"] = chunk["HADM_ID"].parallel_apply(lambda x : hadm_icu_dict[x])
+                chunk["EVENT_SEQ"] = chunk.parallel_apply(apply_event_seq, axis=1)
+                
+                chunk.sort_values(
+                    by=['HADM_ID', "ICUSTAY_ID", "CHARTTIME"], inplace=True)
+
+                preprocessed_chunk = chunk[[
+                    "HADM_ID", "ICUSTAY_ID", "CHARTTIME", "EVENT_SEQ"]].dropna(axis=0)
+                total_df = pd.concat([total_df, preprocessed_chunk])
+                
             print("processes run time {:f} seconds.".format(time.time() - t0))
+        return total_df
             
             
     """Main Code"""
     # preprocess each table
-    table_names = ["ICUSTAYS", "LABEVENTS", "PRESCRIPTIONS", "INPUTEVENTS_CV", "INPUTEVENTS_MV", "OUTPUTEVENTS"]
+    table_names = ["ICUSTAYS", "LABEVENTS", "PRESCRIPTIONS", "INPUTEVENTS_CV", "INPUTEVENTS_MV", "OUTPUTEVENTS", "CHARTEVENTS"]
     for table_name in table_names:
         table_path = os.path.join(data_dir_path, f"{table_name}.csv")
-        chunk_parallel(table_name, table_path, tokenizer)
+        total_df = chunk_parallel(table_name, table_path, total_df)
 
     # make {inputs : [e, e, e, ...], label : [0, 1, 2, 0, ..., -1, 1, 0]}
     mimiciii_labels = pd.read_csv(os.path.join(root_dir, "labels/mimiciii_labels.csv"))
    
-    seq_lens = []
-    more_than_128 = []
+    total_df = total_df.drop(["HADM_ID"], axis=1).sort_values(by=["ICUSTAY_ID", "CHARTTIME"])
+    
+    for icustay_id, group in tqdm(total_df.groupby("ICUSTAY_ID")):
+        tokenized_events = []
+        for event_seq in group["EVENT_SEQ"].values:
+            tokenized = tokenizer.encode(event_seq)
+            if len(tokenized) < 128:
+                tokenized += [0] * (128-len(tokenized))
+            elif len(tokenized) > 128:
+                tokenized = tokenized[:128]
+            tokenized_events.append(tokenized)
 
-    for hadm_id, icu_stay_info in tqdm(hadm_dict.items()):
-        icustay_id = list(icu_stay_info.keys())[0]
-
-        # event
-        events = []
-        max_seq_len = max([len(e) for t, e in icu_stay_info[icustay_id]['events']])
-        
-        icu_stay_info[icustay_id]['events'] = sorted(icu_stay_info[icustay_id]['events'], key=lambda x: x[0])
-
-        for curr_datetime, event in icu_stay_info[icustay_id]['events']:
-            seq_lens.append(len(event))
-            if len(event) > 128:
-                more_than_128.append(len(event))
-            event = event + [0] * (max_seq_len - len(event)) # padding
-            events.append(event)
-        
-        events = np.array(events)
-
-        # label & save
-        if len(mimiciii_labels[mimiciii_labels["ICUSTAY_ID"]==icustay_id]) > 0:
-            for i, row in mimiciii_labels[mimiciii_labels["ICUSTAY_ID"]==icustay_id].iterrows():
+        if len(mimiciii_labels[mimiciii_labels["ICUSTAY_ID"] == icustay_id]) > 0:
+            for i, row in mimiciii_labels[mimiciii_labels["ICUSTAY_ID"] == icustay_id].iterrows():
                 labels = np.array(eval(row["labels"]))
-
-            # Data Save
-            icu_stay_dict = {"input": events, "label": labels} 
+            
+            tokenized_events = np.array(tokenized_events)
+            icu_stay_dict = {"input": tokenized_events, "label": labels}
             with open(file=os.path.join(dest_dir, f'mimiciii_{icustay_id}.pickle'), mode='wb') as f:
                 pickle.dump(icu_stay_dict, f)
 
+    return 
 
 ########## mimiciv preprocess functions ##########
 def preprocess_mimiciv(root_dir, dest_dir):
