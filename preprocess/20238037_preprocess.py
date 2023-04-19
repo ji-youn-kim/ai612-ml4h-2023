@@ -76,23 +76,23 @@ def preprocess_eicu(root_dir, dest_dir):
         df = pd.read_csv(label_path)
 
         def map_labels(row):
-            stay_id, labels = row
-            eicu_data[stay_id] = {
+            stayid, labels = row
+            eicu_data[stayid] = {
                 'inputs': [],
                 'labels': np.array(eval(labels)),
                 'pid': -1,
             }
 
-        tqdm.pandas(desc='eicu | labels')
+        tqdm.pandas(desc='eicu | get labels')
         df.progress_apply(map_labels, axis=1)
 
         pid2icustayids = defaultdict(set)
 
         def map_pid(row):
-            stay_id, patient_id = row
-            if stay_id in eicu_data:
-                eicu_data[stay_id]['pid'] = patient_id
-                pid2icustayids[patient_id].add(stay_id)
+            stayid, patientid = row
+            if stayid in eicu_data:
+                eicu_data[stayid]['pid'] = patientid
+                pid2icustayids[patientid].add(stayid)
 
         df = pd.read_csv(patient_path, usecols=['patientunitstayid', 'uniquepid'])
 
@@ -123,10 +123,10 @@ def preprocess_eicu(root_dir, dest_dir):
             })
 
         events = df.get(['patientunitstayid', offset_col, 'text']).groupby('patientunitstayid')
-        for stay_id, group in tqdm(events, desc='eicu | group events: ' + table_name):
-            if stay_id not in eicu_data: continue
-            stay_id_event_list = eicu_data[stay_id]['inputs']
-            group.apply(map_table, axis=1, args=(stay_id_event_list,))
+        for stayid, group in tqdm(events, desc=f'eicu | group events {table_name}:'):
+            if stayid not in eicu_data: continue
+            stay_event_list = eicu_data[stayid]['inputs']
+            group.apply(map_table, axis=1, args=(stay_event_list,))
 
         return eicu_data
 
@@ -175,15 +175,15 @@ def preprocess_eicu(root_dir, dest_dir):
         eicu_data = eicu_get_table(*table.get(), eicu_data)
 
     small_eicu_data = copy(eicu_data)
-    for icustay_id, icustay in eicu_data.items():
+    for stayid, icustay in eicu_data.items():
         if len(icustay['inputs']) == 0:
-            del small_eicu_data[icustay_id]
+            del small_eicu_data[stayid]
 
     final_eicu_data = {}
 
     tokenizer = AutoTokenizer.from_pretrained('emilyalsentzer/Bio_ClinicalBERT')
 
-    for icustay_id, icustay in tqdm(small_eicu_data.items(), desc='eicu | sort and tokenize events'):
+    for stayid, icustay in tqdm(small_eicu_data.items(), desc='eicu | sort and tokenize events'):
         # pid = icustay['pid']
         events = icustay['inputs']
         sorted_events = sorted(events, key=lambda a: a['offset'])
@@ -195,7 +195,7 @@ def preprocess_eicu(root_dir, dest_dir):
             final_events.append(event['text'])
         final_icustay['input'] = np.array(tokenizer(final_events, max_length=128, truncation=True, padding='max_length')['input_ids'])
 
-        final_eicu_data[icustay_id] = final_icustay
+        final_eicu_data[stayid] = final_icustay
 
     # total_num = len(small_eicu_data)
     # train_num = total_num // 10 * 9
@@ -203,25 +203,18 @@ def preprocess_eicu(root_dir, dest_dir):
     # assert total_num == train_num + val_num
 
     # val_count = 0
-    # val_icustay_ids = set()
-    # for icustay_id, icustay in tqdm(small_eicu_data.items(), desc='eicu | split train/eval'):
+    # _icustayids = set()
+    # for stayid, icustay in tqdm(small_eicu_data.items(), desc='eicu | split train/eval'):
     #     pid = icustay['pid']
     #     if len(pid2icustayids[pid]) == 1 and val_count < val_num:
     #         val_count += 1
-    #         val_icustay_ids.add(icustay_id)
+    #         _icustayids.add(stayid)
 
-    # for icustay_id, icustay in tqdm(small_eicu_data.items(), desc='eicu | tokenize'):
-
-        # if icustay_id in val_icustay_ids:
-        #     final_icustay_path = os.path.join(dest_dir, 'val', f'eicu_{icustay_id}.pickle')
-        # else:
-        #     final_icustay_path = os.path.join(dest_dir, 'train', f'eicu_{icustay_id}.pickle')
-
-    for icustay_id, final_icustay in tqdm(final_eicu_data.items(), desc='eicu | save datafiles'):
+    for stayid, final_icustay in tqdm(final_eicu_data.items(), desc='eicu | save datafiles'):
     # def map_save(icustay):
-        # icustay_id, final_icustay = icustay
+        # stayid, final_icustay = icustay
 
-        final_icustay_path = os.path.join(dest_dir, f'eicu_{icustay_id}.pickle')
+        final_icustay_path = os.path.join(dest_dir, f'eicu_{stayid}.pickle')
         with open(final_icustay_path, 'wb') as f:
             pickle.dump(final_icustay, f)
 
