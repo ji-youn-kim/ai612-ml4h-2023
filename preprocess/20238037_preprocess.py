@@ -231,8 +231,8 @@ def preprocess_mimiciii(root_dir, dest_dir):
 
     # identification files
     data_dir_path = os.path.join(root_dir, "mimiciii/")
-    d_items = os.path.join("/home/data_storage/mimiciii-1.4", "D_ITEMS.csv")
-    d_labitems = os.path.join("/home/data_storage/mimiciii-1.4", "D_LABITEMS.csv")
+    d_items = os.path.join(data_dir_path, "D_ITEMS.csv")
+    d_labitems = os.path.join(data_dir_path, "D_LABITEMS.csv")
 
 
     col_names_per_table = {
@@ -383,8 +383,8 @@ def preprocess_mimiciv(root_dir, dest_dir):
     PRESCRIPTION_PATH = os.path.join(MIMIC4_DIR, 'prescriptions.csv')
     LABEVENTS_PATH = os.path.join(MIMIC4_DIR, 'labevents.csv')
     OUTPUTEVENTS_PATH = os.path.join(MIMIC4_DIR, 'outputevents.csv')
-    D_LABITEMS_PAHT=os.path.join(MIMIC4_DIR, 'd_labitems.csv.gz')
-    D_ITEMS_PATH = os.path.join(MIMIC4_DIR, 'd_items.csv.gz')
+    D_LABITEMS_PAHT=os.path.join(MIMIC4_DIR, 'd_labitems.csv')
+    D_ITEMS_PATH = os.path.join(MIMIC4_DIR, 'd_items.csv')
     
     inputevent = pd.DataFrame(pd.read_csv(INPUTEVENT_PATH))
     prescription = pd.DataFrame(pd.read_csv(PRESCRIPTION_PATH))
