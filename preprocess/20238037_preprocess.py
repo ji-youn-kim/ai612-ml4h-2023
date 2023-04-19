@@ -232,9 +232,8 @@ def preprocess_mimiciii(root_dir, dest_dir):
 
     # identification files
     data_dir_path = os.path.join(root_dir, "mimiciii/")
-    d_items = pd.read_csv(os.path.join("/home/data_storage/mimiciii-1.4", "D_ITEMS.csv"))
-    d_labitems = pd.read_csv(os.path.join(
-        "/home/data_storage/mimiciii-1.4", "D_LABITEMS.csv"))
+    d_items = pd.read_csv(os.path.join(data_dir_path, "D_ITEMS.csv"))
+    d_labitems = pd.read_csv(os.path.join(data_dir_path, "D_LABITEMS.csv"))
 
     d_items_dict = dict(zip(d_items["ITEMID"], d_items["LABEL"]))
     d_labitems_dict = dict(zip(d_labitems["ITEMID"], d_labitems["LABEL"]))
