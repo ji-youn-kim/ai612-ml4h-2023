@@ -331,6 +331,9 @@ def preprocess_mimiciii(root_dir, dest_dir):
 
                 preprocessed_chunk = chunk[[
                     "HADM_ID", "ICUSTAY_ID", "CHARTTIME", "EVENT_SEQ"]].dropna(axis=0)
+                
+                preprocessed_chunk = preprocessed_chunk.sort_values(by="CHARTTIME")
+
                 total_df = pd.concat([total_df, preprocessed_chunk])
                 
             print(
