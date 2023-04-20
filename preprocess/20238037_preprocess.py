@@ -33,6 +33,13 @@ def get_parser():
         help="output directory"
     )
 
+    parser.add_argument(
+        "--sample_filtering",
+        type=bool,
+        default=True,
+        help="indicator to prevent filtering from being applies to the test dataset."
+    )
+
     parser.add_argument('--no_eicu', action='store_true')
 
     parser.add_argument('--no_mimiciii', action='store_true')
@@ -316,6 +323,7 @@ def preprocess_mimiciii(root_dir, dest_dir):
                 #print(chunk.columns)
                 if "ICUSTAY_ID" not in chunk.columns:
                     chunk["ICUSTAY_ID"] = chunk["HADM_ID"].parallel_apply(lambda x : hadm_icu_dict[x])
+                
                 chunk["EVENT_SEQ"] = chunk.parallel_apply(apply_event_seq, axis=1)
                 
                 chunk.sort_values(
@@ -323,9 +331,13 @@ def preprocess_mimiciii(root_dir, dest_dir):
 
                 preprocessed_chunk = chunk[[
                     "HADM_ID", "ICUSTAY_ID", "CHARTTIME", "EVENT_SEQ"]].dropna(axis=0)
+                
+                preprocessed_chunk = preprocessed_chunk.sort_values(by="CHARTTIME")
+
                 total_df = pd.concat([total_df, preprocessed_chunk])
                 
-            print("processes run time {:f} seconds.".format(time.time() - t0))
+            print(
+                f"{table_name}_processes run time {time.time() - t0:f} seconds.")
         return total_df
             
             
@@ -339,10 +351,18 @@ def preprocess_mimiciii(root_dir, dest_dir):
     # make {inputs : [e, e, e, ...], label : [0, 1, 2, 0, ..., -1, 1, 0]}
     mimiciii_labels = pd.read_csv(os.path.join(root_dir, "labels/mimiciii_labels.csv"))
    
-    total_df = total_df.drop(["HADM_ID"], axis=1).sort_values(by=["ICUSTAY_ID", "CHARTTIME"])
+    total_df = total_df.drop(["HADM_ID"], axis=1)
     
     for icustay_id, group in tqdm(total_df.groupby("ICUSTAY_ID")):
         tokenized_events = []
+        #print(group.iloc[-100:, :])
+        
+        if len(group) > 256:
+            group = group.iloc[:256, :]
+        
+        group = group.sort_values(by=["CHARTTIME"])
+
+        #print(group["EVENT_SEQ"].values.shape)
         for event_seq in group["EVENT_SEQ"].values:
             tokenized = tokenizer.encode(event_seq)
             if len(tokenized) < 128:
