@@ -75,7 +75,7 @@ def main(args):
 
 ########## eicu preprocess functions ##########
 def preprocess_eicu(root_dir, dest_dir):
-    pandarallel.initialize(nb_workers=32, progress_bar=True)
+    pandarallel.initialize(nb_workers=32, progress_bar=False)
 
     def eicu_get_labels(label_path, patient_path):
         eicu_data = {}
@@ -110,7 +110,7 @@ def preprocess_eicu(root_dir, dest_dir):
         return eicu_data, pid2icustayids
 
     def eicu_get_table(table_name, table_path, relevant_cols, offset_col, eicu_data):
-        df = pd.read_csv(table_path, usecols=relevant_cols+['patientunitstayid', offset_col])
+        df = pd.read_csv(table_path, usecols=relevant_cols+['patientunitstayid', offset_col], low_memory=False)
 
         # 2-pass vectorized
         for col_name in relevant_cols:
@@ -118,7 +118,7 @@ def preprocess_eicu(root_dir, dest_dir):
         df.insert(0, table_name, table_name)
 
         # tqdm.pandas(desc='eicu | join text: ' + table_name)
-        print('eicu | join text: ' + table_name)
+        print(f'eicu | join text ({table_name})')
         df['text'] = df.drop(['patientunitstayid', offset_col], axis=1).parallel_apply(lambda x :' '.join(x.astype(str)), axis=1)
 
         def map_table(row, *args):
@@ -130,7 +130,7 @@ def preprocess_eicu(root_dir, dest_dir):
             })
 
         events = df.get(['patientunitstayid', offset_col, 'text']).groupby('patientunitstayid')
-        for stayid, group in tqdm(events, desc=f'eicu | group events {table_name}:'):
+        for stayid, group in tqdm(events, desc=f'eicu | group events ({table_name})'):
             if stayid not in eicu_data: continue
             stay_event_list = eicu_data[stayid]['inputs']
             group.apply(map_table, axis=1, args=(stay_event_list,))
@@ -153,7 +153,13 @@ def preprocess_eicu(root_dir, dest_dir):
     INTAKEOUTPUT_PATH = os.path.join(EICU_DIR, 'intakeOutput.csv')
     LAB_PATH = os.path.join(EICU_DIR, 'lab.csv')
     MEDICATION_PATH = os.path.join(EICU_DIR, 'medication.csv')
-    # NURSECHARTING_PATH = os.path.join(EICU_DIR, 'nurseCharting.csv')
+
+    NURSEASSESSMENT_PATH = os.path.join(EICU_DIR, 'nurseAssessment.csv')
+    NURSECARE_PATH = os.path.join(EICU_DIR, 'nurseCare.csv')
+    NURSECHARTING_PATH = os.path.join(EICU_DIR, 'nurseCharting.csv')
+
+    VITALAPERIODIC_PATH = os.path.join(EICU_DIR, 'vitalAperiodic.csv')
+    VITALPERIODIC_PATH = os.path.join(EICU_DIR, 'vitalPeriodic.csv')
 
     tables_info = [
         Table(
@@ -163,16 +169,46 @@ def preprocess_eicu(root_dir, dest_dir):
             offset_col='intakeoutputentryoffset'
         ),
         Table(
+            table_name='lab',
+            table_path=LAB_PATH,
+            relevant_cols=['labtypeid','labname','labresulttext','labmeasurenameinterface'],
+            offset_col='labresultoffset'
+        ),
+        Table(
             table_name='medication',
             table_path=MEDICATION_PATH,
             relevant_cols=['drugivadmixture', 'drugordercancelled', 'drugname', 'drughiclseqno', 'dosage', 'routeadmin', 'frequency', 'loadingdose', 'prn', 'gtc'],
             offset_col='drugorderoffset'
         ),
         Table(
-            table_name='lab',
-            table_path=LAB_PATH,
-            relevant_cols=['labtypeid','labname','labresulttext','labmeasurenameinterface'],
-            offset_col='labresultoffset'
+            table_name='nurseassessment',
+            table_path=NURSEASSESSMENT_PATH,
+            relevant_cols=['celllabel','cellattribute','cellattributevalue'],
+            offset_col='nurseassessoffset'
+        ),
+        Table(
+            table_name='nursecare',
+            table_path=NURSECARE_PATH,
+            relevant_cols=['cellattribute','cellattributevalue'],
+            offset_col='nursecareoffset'
+        ),
+        Table(
+            table_name='nursecharting',
+            table_path=NURSECHARTING_PATH,
+            relevant_cols=['nursingchartcelltypecat','nursingchartcelltypevallabel','nursingchartcelltypevalname','nursingchartvalue'],
+            offset_col='nursingchartoffset'
+        ),
+        Table(
+            table_name='vitalaperiodic',
+            table_path=VITALAPERIODIC_PATH,
+            relevant_cols=['noninvasivesystolic','noninvasivediastolic','noninvasivemean'],
+            offset_col='observationoffset'
+        ),
+        Table(
+            table_name='vitalperiodic',
+            table_path=VITALPERIODIC_PATH,
+            relevant_cols=['temperature','sao2','heartrate','respiration','cvp','etco2','systemicsystolic','systemicdiastolic','systemicmean','pasystolic','padiastolic','pamean','st1','st2','st3','icp'],
+            offset_col='observationoffset'
         ),
     ]
     
@@ -182,9 +218,11 @@ def preprocess_eicu(root_dir, dest_dir):
         eicu_data = eicu_get_table(*table.get(), eicu_data)
 
     small_eicu_data = copy(eicu_data)
-    for stayid, icustay in eicu_data.items():
-        if len(icustay['inputs']) == 0:
-            del small_eicu_data[stayid]
+
+    if args.sample_filtering:
+        for stayid, icustay in eicu_data.items():
+            if len(icustay['inputs']) == 0:
+                del small_eicu_data[stayid]
 
     final_eicu_data = {}
 
@@ -198,7 +236,7 @@ def preprocess_eicu(root_dir, dest_dir):
             'labels': icustay['labels']
         }
         final_events = []
-        for event in sorted_events:
+        for event in sorted_events[:256]:
             final_events.append(event['text'])
         final_icustay['input'] = np.array(tokenizer(final_events, max_length=128, truncation=True, padding='max_length')['input_ids'])
 
