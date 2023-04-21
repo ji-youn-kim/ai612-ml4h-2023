@@ -67,7 +67,7 @@ def main(args):
         preprocess_eicu(root_dir=root_dir, dest_dir=dest_dir)
 
     if not args.no_mimiciii:
-        preprocess_mimiciii(root_dir=root_dir, dest_dir=dest_dir)
+        preprocess_mimiciii(root_dir=root_dir, dest_dir=dest_dir, sample_filtering=args.sample_filtering)
 
     if not args.no_mimiciv:
         preprocess_mimiciv(root_dir=root_dir, dest_dir=dest_dir)
@@ -227,7 +227,7 @@ def preprocess_eicu(root_dir, dest_dir):
 
                   
 ########## mimiciii preprocess functions ##########
-def preprocess_mimiciii(root_dir, dest_dir):
+def preprocess_mimiciii(root_dir, dest_dir, sample_filtering):
     pandarallel.initialize(nb_workers=32, progress_bar=True)
     
     total_df = pd.DataFrame(columns=['HADM_ID', 'ICUSTAY_ID', 'CHARTTIME', 'EVENT_SEQ'])
@@ -350,10 +350,13 @@ def preprocess_mimiciii(root_dir, dest_dir):
 
     # make {inputs : [e, e, e, ...], label : [0, 1, 2, 0, ..., -1, 1, 0]}
     mimiciii_labels = pd.read_csv(os.path.join(root_dir, "labels/mimiciii_labels.csv"))
+    mimiciii_labels_dict = dict(zip(mimiciii_labels["ICUSTAY_ID"], mimiciii_labels["labels"]))
    
     total_df = total_df.drop(["HADM_ID"], axis=1)
     
+    curr_icustays = []
     for icustay_id, group in tqdm(total_df.groupby("ICUSTAY_ID")):
+        curr_icustays.append(icustay_id)
         tokenized_events = []
         #print(group.iloc[-100:, :])
         
@@ -372,14 +375,22 @@ def preprocess_mimiciii(root_dir, dest_dir):
             tokenized_events.append(tokenized)
 
         if len(mimiciii_labels[mimiciii_labels["ICUSTAY_ID"] == icustay_id]) > 0:
-            for i, row in mimiciii_labels[mimiciii_labels["ICUSTAY_ID"] == icustay_id].iterrows():
-                labels = np.array(eval(row["labels"]))
+            labels = mimiciii_labels_dict[icustay_id]
+            labels = np.array(eval(labels))
             
             tokenized_events = np.array(tokenized_events)
             icu_stay_dict = {"input": tokenized_events, "label": labels}
             with open(file=os.path.join(dest_dir, f'mimiciii_{icustay_id}.pickle'), mode='wb') as f:
                 pickle.dump(icu_stay_dict, f)
 
+    if not sample_filtering:
+        left_samples = list(set(mimiciii_labels_dict.keys()) - set(curr_icustays))
+        print("number of samples with no events: ", len(left_samples))
+        for icustay_id in tqdm(left_samples, desc="samples with no events"):
+            labels = np.array(eval(mimiciii_labels_dict[icustay_id]))
+            icu_stay_dict = {"input": np.array([]), "label": labels}
+            with open(file=os.path.join(dest_dir, f'mimiciii_{icustay_id}.pickle'), mode='wb') as f:
+                pickle.dump(icu_stay_dict, f)
     return 
 
 ########## mimiciv preprocess functions ##########
