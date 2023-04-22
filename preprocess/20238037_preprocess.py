@@ -6,11 +6,14 @@ from tqdm import tqdm
 import numpy as np
 import pickle
 import collections
+from collections import Counter
 from datetime import datetime
 from collections import defaultdict
 from pandarallel import pandarallel
 from copy import copy
 from transformers import AutoTokenizer
+from operator import itemgetter
+import multiprocessing as mp
 
 def get_parser():
     """
@@ -440,8 +443,9 @@ def preprocess_mimiciv(root_dir, dest_dir):
     PRESCRIPTION_PATH = os.path.join(MIMIC4_DIR, 'prescriptions.csv')
     LABEVENTS_PATH = os.path.join(MIMIC4_DIR, 'labevents.csv')
     OUTPUTEVENTS_PATH = os.path.join(MIMIC4_DIR, 'outputevents.csv')
-    D_LABITEMS_PAHT=os.path.join(MIMIC4_DIR, 'd_labitems.csv')
-    D_ITEMS_PATH = os.path.join(MIMIC4_DIR, 'd_items.csv')
+    D_LABITEMS_PAHT=os.path.join(MIMIC4_DIR, 'd_labitems.csv.gz')
+    D_ITEMS_PATH = os.path.join(MIMIC4_DIR, 'd_items.csv.gz')
+    CHARTEVENTS_PATH = os.path.join(MIMIC4_DIR, 'chartevents.csv')
     
     inputevent = pd.DataFrame(pd.read_csv(INPUTEVENT_PATH))
     prescription = pd.DataFrame(pd.read_csv(PRESCRIPTION_PATH))
@@ -450,6 +454,7 @@ def preprocess_mimiciv(root_dir, dest_dir):
     d_labitems = pd.DataFrame(pd.read_csv(D_LABITEMS_PAHT, compression='gzip', sep=','))
     d_itmes=pd.DataFrame(pd.read_csv(D_ITEMS_PATH, compression='gzip', sep=','))
     labels = pd.DataFrame(pd.read_csv(LABELS_PATH))
+    chartevents = list(pd.read_csv(CHARTEVENTS_PATH, chunksize=10000))
     
     def get_labitem_name(d_labitems):
         labitem_name =dict()
@@ -529,6 +534,7 @@ def preprocess_mimiciv(root_dir, dest_dir):
             
         return out_input
     
+    
     def concat(out_input):
         result=[]
         stay_id_list=[]
@@ -596,12 +602,76 @@ def preprocess_mimiciv(root_dir, dest_dir):
             
         return 
     
+    def multi_processing(chartevents_list,top100_itemid):
+        global delete_rows
+        def delete_rows(df, top100_itemid):
+            df = pd.DataFrame(df)
+            del_list=[]
+            for idx in df.index:
+                if df.loc[idx, 'itemid'] not in top100_itemid:
+                    del_list.append(idx)
+            df.drop(del_list, axis=0, inplace = True)   
+            return df 
+  
+        pool = mp.Pool(15) # use 4 processes
+
+        funclist = []
+        for df in tqdm(chartevents_list):
+            f = pool.apply_async(delete_rows,(df, top100_itemid))
+            funclist.append(f)
+  
+        chart_result=pd.DataFrame(columns=['subject_id', 'hadm_id', 'stay_id', 'charttime', 'storetime', 'itemid',
+       'value', 'valuenum', 'valueuom', 'warning'])
+        
+        for f in tqdm(funclist):
+            chart_result = pd.concat([chart_result, f.get()])
+        chart_result.to_csv(os.path.join(MIMIC4_DIR, 'top150_chartevents.csv'))
+    
+        return chart_result
+    
+    def create_chart_dict(chartevents_list, lack_stayid):
+        global collect_chartevnts
+        def collect_chartevnts(df, lack_stayid):
+            chartevent_group = defaultdict(dict)
+            for idx,row in df.iterrows():
+                    if row['stay_id'] in lack_stayid:
+                            chartevent_group[row['stay_id']][row['charttime']]=row[['item_name','value','valuenum','valueuom','warning' ]]
+                    else:
+                            continue
+
+            chart_dict=defaultdict(dict)
+            for stayid, events in chartevent_group.items():
+                    tmp=dict()
+                    #sorted_chartevent=dict()
+                    #sorted_events = collections.OrderedDict(sorted(events.items() ))
+                    for time, explain in events.items() :
+                            tmp[time] = explain
+                    chart_dict[stayid] = tmp
+        
+            return chart_dict
+        
+        pool = mp.Pool(15) 
+        
+        funclist = []
+        for df in tqdm(chartevents_list):
+            f = pool.apply_async(collect_chartevnts,(df, lack_stayid))
+            funclist.append(f)
+            
+        chart_dict=defaultdict(dict)
+        for f in tqdm(funclist):
+            chunk_dict = f.get()
+            for stayid,events in chunk_dict.items():
+                chart_dict.update({stayid : events})
+        
+        return chart_dict
+    
     labitem_name = get_labitem_name(d_labitems)
     item_name = get_item_name(d_itmes)
     labevents['item_name'] = None
     labevents['item_name'] = labevents.apply(lambda row: parsing(row['itemid']) ,axis=1 )
     outputevent['item_name'] = outputevent.apply(lambda row: parsing2(row['itemid']), axis=1)
     inputevent['item_name'] = inputevent.apply(lambda row: parsing2(row['itemid']), axis=1)
+    
     
     ##collect all events by stay_id
     print("collecting")
@@ -611,9 +681,68 @@ def preprocess_mimiciv(root_dir, dest_dir):
     lab_input = collect_labinput(labevents, prescription_input, stay_hadm_dict)
     out_input = collect_outinput(outputevent, lab_input)
     result, stay_id_list = concat(out_input)
+    
+    ##adding chartevents
+    print("adding chartevent")
+    item_dict= Counter()
+    for chunk in tqdm(chartevents):
+        chunkdf = chunk.itemid
+        counter = Counter(chunkdf)
+        item_dict+=counter
+    sorted_C = sorted(item_dict.items(), key=itemgetter(1), reverse=True)
+    top100_itemid=[]
+    for i in range(150):
+        top100_itemid.append(sorted_C[i][0])
+        
+    print("multiprocessing")
+    chart_result = multi_processing(chartevents, top100_itemid)
+    
+    print("saving temoporary chartevents")
+    preprocessed_charts = pd.read_csv(os.path.join(MIMIC4_DIR, 'top150_chartevents.csv'))
+    preprocessed_chart_list = list(pd.read_csv(os.path.join(MIMIC4_DIR, 'top150_chartevents.csv'),chunksize=10000))
+    preprocessed_charts['item_name'] = preprocessed_charts.apply(lambda row: parsing2(row['itemid']), axis=1)
+    preprocessed_charts.to_csv(os.path.join(MIMIC4_DIR,'tmp_preprocess_charts.csv'))
+    chartevents_list = list(pd.read_csv(os.path.join(MIMIC4_DIR,'tmp_preprocess_charts.csv'), chunksize=10000))
+    
+    lack_stayid=[]
+    for key,val in out_input.items():
+        if len(val)<256*2:
+            lack_stayid.append(key)
+        else:
+            out_input[key] = val[:256*2] 
+    
+    print("creating chart dictionary time:events")
+    chart_dict = create_chart_dict(chartevents_list, lack_stayid)
+            
+    sorted_chart = defaultdict(list)
+    for stayid,events in tqdm(chart_dict.items()):
+        sorted_events = collections.OrderedDict(sorted(events.items() ))
+
+        for time,events in sorted_events.items():
+            short_str=[]
+            for key,val in events.items():
+                short_str.append(key.replace('\'',''))
+                short_str.append(val)
+            string = 'chartevent'+' '+' '.join(map(str,short_str))
+            sorted_chart[stayid].append(time)
+            sorted_chart[stayid].append(string)
+    
+    print("concatting to make 256")
+    tmp_result = result.copy()
+    for idx,stayid in enumerate(stay_id_list):
+        if stayid in lack_stayid:
+            needed = 256-len(result[idx])
+            for i in range(needed):
+                try : 
+                    time = sorted_chart[stayid][2*i]
+                    string = sorted_chart[stayid][2*i+1]
+                    tmp_result[idx].update({time: [string]})
+                except:
+                    break
+                
     #sorting by time
     print("sorting")
-    final = time_sorting(result,stay_id_list)
+    final = time_sorting(tmp_result,stay_id_list)
     #tokenize
     tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
     print("saving")
