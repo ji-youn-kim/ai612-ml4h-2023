@@ -748,16 +748,6 @@ def preprocess_mimiciv(root_dir, dest_dir, sample_filtering):
     print("saving")
     tokenizing(dest_dir,final, tokenizer,labels)
 
-    # if not sample_filtering:
-    #     breakpoint()
-    #     for icustay in np.setdiff1d(labels['stay_id'].to_numpy(), np.fromiter(final.keys(), dtype=int)):
-    #         empty = dict()
-    #         empty['input'] = np.array([])
-    #         empty['label'] = eval(labels[labels['stay_id'] == icustay].iloc[0]['labels'])
-            
-    #         with open(os.path.join(dest_dir, f'mimic4_{icustay}.pkl'), 'wb') as f:
-    #             pickle.dump(empty,f)
-
 
 if __name__ == "__main__":
     parser = get_parser()
