@@ -50,7 +50,7 @@ class MyDataset20238037(BaseDataset):
 
     def collator(self, samples):
         
-        samples = [s for s in samples if s['input'] is not None]
+        samples = [s for s in samples if len(s['input']) != 0]
     
         if len(samples) == 0:
             return {}
