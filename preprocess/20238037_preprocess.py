@@ -14,7 +14,9 @@ from copy import copy
 from transformers import AutoTokenizer
 from operator import itemgetter
 import multiprocessing as mp
-
+import wandb
+wandb.init(project="ML4H preprocess")
+wandb.run.name = 'add timestamp class && except cases in concat function'
 def get_parser():
     """
     Note:
@@ -493,9 +495,9 @@ def preprocess_mimiciv(root_dir, dest_dir, sample_filtering):
         return ans
     
     def stay_subject_mapping(inputevent):
-        stay_hadm_dict = defaultdict(set)
+        stay_hadm_dict = dict()
         for idx,row in tqdm(inputevent.iterrows()):
-            stay_hadm_dict[row['hadm_id']].add(row['stay_id'])
+            stay_hadm_dict[row['hadm_id']] = row['stay_id']
             
         return stay_hadm_dict
         
@@ -516,7 +518,8 @@ def preprocess_mimiciv(root_dir, dest_dir, sample_filtering):
         prescription_input = input_dict.copy()
         for idx,row in tqdm(prescription.iterrows()):
             
-            stayid = str(stay_hadm_dict[row['hadm_id']])
+            try : stayid = stay_hadm_dict[row['hadm_id']]
+            except : continue
             prescription_input[stayid].append('prescriptions')
             prescription_input[stayid].append(row[['starttime','pharmacy_id', 'poe_id', 'poe_seq','drug_type', 'drug', 'formulary_drug_cd',
             'gsn', 'ndc', 'prod_strength', 'form_rx', 'dose_val_rx', 'dose_unit_rx',
@@ -529,7 +532,8 @@ def preprocess_mimiciv(root_dir, dest_dir, sample_filtering):
         lab_input = prescription_input.copy()
         for idx, row in tqdm(labevents.iterrows()):
             
-            stayid = str(stay_hadm_dict[row['hadm_id']])
+            try: stayid = stay_hadm_dict[row['hadm_id']]
+            except : continue
             lab_input[stayid].append('labevents')
             lab_input[stayid].append(row[['charttime','item_name','value', 'valuenum', 'valueuom',
             'ref_range_lower', 'ref_range_upper', 'flag', 'priority', 'comments']])
@@ -556,28 +560,35 @@ def preprocess_mimiciv(root_dir, dest_dir, sample_filtering):
                     table_name = event
                 else:
                     short_str=[]
-                    for key,val in event.items():
-                        if key=='starttime' or key=='charttime':
-                            continue
-                        else:
-                            short_str.append(key.replace('\'',''))
-                            short_str.append(val)
-                        string = table_name+' '+' '.join(map(str,short_str))
+                    try:
+                        for key,val in event.items():
+                            if key=='starttime' or key=='charttime':
+                                continue
+                            else:
+                                short_str.append(key.replace('\'',''))
+                                short_str.append(val)
+                            string = table_name+' '+' '.join(map(str,short_str))
+                    except:
+                        continue
                     time_value[event.values[0]].append(string)
             result.append(time_value)
             stay_id_list.append(stay_id)
         
         return result, stay_id_list
     
+    class timestamp(object):
+        def __init__(self, time):
+            self.time = time
+        def __str__(self):
+            return self.time
+        def __repr__(self):
+            return "'" + self.time + "'"
+    
     def time_sorting(result,stay_id_list):
         final=dict()
         for idx,stay in enumerate(result):
-            new_events = collections.OrderedDict(sorted(stay.items()))
-            #string = ''.join(map(str,new_events.values()))
-            string = list(new_events.values())
-
-            final[stay_id_list[idx]]=string
-        
+            final[stay_id_list[idx]]= list(stay.values())
+    
         return final
     
     def tokenizing(dest_dir,final, tokenizer,labels):
@@ -635,7 +646,7 @@ def preprocess_mimiciv(root_dir, dest_dir, sample_filtering):
         
         for f in tqdm(funclist):
             chart_result = pd.concat([chart_result, f.get()])
-        chart_result.to_csv(os.path.join(MIMIC4_DIR, 'top150_chartevents.csv'))
+        chart_result.to_csv(os.path.join(MIMIC4_DIR, 'top200_chartevents.csv'))
     
         return chart_result
     
@@ -691,7 +702,17 @@ def preprocess_mimiciv(root_dir, dest_dir, sample_filtering):
     lab_input = collect_labinput(labevents, prescription_input, stay_hadm_dict)
     out_input = collect_outinput(outputevent, lab_input)
     result, stay_id_list = concat(out_input)
-    
+    expanded_result = []
+    for stayid in result:
+        tmp = dict()
+        for time, events in stayid.items():
+            if len(events)>1:
+                for elem in events:
+                    tmp[timestamp(time)] = [elem]
+            else:
+                tmp[time] = events
+        expanded_result.append(tmp)
+        
     ##adding chartevents
     print("adding chartevent")
     item_dict= Counter()
@@ -701,15 +722,15 @@ def preprocess_mimiciv(root_dir, dest_dir, sample_filtering):
         item_dict+=counter
     sorted_C = sorted(item_dict.items(), key=itemgetter(1), reverse=True)
     top100_itemid=[]
-    for i in range(150):
+    for i in range(200):
         top100_itemid.append(sorted_C[i][0])
         
     print("multiprocessing")
     chart_result = multi_processing(chartevents, top100_itemid)
     
     print("saving temoporary chartevents")
-    preprocessed_charts = pd.read_csv(os.path.join(MIMIC4_DIR, 'top150_chartevents.csv'))
-    preprocessed_chart_list = list(pd.read_csv(os.path.join(MIMIC4_DIR, 'top150_chartevents.csv'),chunksize=10000))
+    preprocessed_charts = pd.read_csv(os.path.join(MIMIC4_DIR, 'top200_chartevents.csv'))
+    preprocessed_chart_list = list(pd.read_csv(os.path.join(MIMIC4_DIR, 'top200_chartevents.csv'),chunksize=10000))
     preprocessed_charts['item_name'] = preprocessed_charts.apply(lambda row: parsing2(row['itemid']), axis=1)
     preprocessed_charts.to_csv(os.path.join(MIMIC4_DIR,'tmp_preprocess_charts.csv'))
     chartevents_list = list(pd.read_csv(os.path.join(MIMIC4_DIR,'tmp_preprocess_charts.csv'), chunksize=10000))
@@ -737,22 +758,24 @@ def preprocess_mimiciv(root_dir, dest_dir, sample_filtering):
             sorted_chart[stayid].append(time)
             sorted_chart[stayid].append(string)
     
+    
     print("concatting to make 256")
-    tmp_result = result.copy()
+    tmp_result = expanded_result.copy()
     for idx,stayid in enumerate(stay_id_list):
         if stayid in lack_stayid:
-            needed = 256-len(result[idx])
+            needed = 256-len(expanded_result[idx])
             for i in range(needed):
                 try : 
                     time = sorted_chart[stayid][2*i]
                     string = sorted_chart[stayid][2*i+1]
-                    tmp_result[idx].update({time: [string]})
+                    tmp_result[idx].update({timestamp(time): [string]})
                 except:
                     break
                 
     #sorting by time
     print("sorting")
     final = time_sorting(tmp_result,stay_id_list)
+    
     #tokenize
     tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
     print("saving")
