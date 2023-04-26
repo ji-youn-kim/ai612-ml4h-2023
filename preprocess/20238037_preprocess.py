@@ -75,7 +75,7 @@ def main(args):
         preprocess_mimiciii(root_dir=root_dir, dest_dir=dest_dir, sample_filtering=args.sample_filtering)
 
     if not args.no_mimiciv:
-        preprocess_mimiciv(root_dir=root_dir, dest_dir=dest_dir)
+        preprocess_mimiciv(root_dir=root_dir, dest_dir=dest_dir, sample_filtering=args.sample_filtering)
 
 
 ########## eicu preprocess functions ##########
@@ -91,6 +91,7 @@ def preprocess_eicu(root_dir, dest_dir):
             stayid, labels = row
             eicu_data[stayid] = {
                 'inputs': [],
+                'chartevents': [],
                 'labels': np.array(eval(labels)),
                 'pid': -1,
             }
@@ -137,7 +138,7 @@ def preprocess_eicu(root_dir, dest_dir):
         events = df.get(['patientunitstayid', offset_col, 'text']).groupby('patientunitstayid')
         for stayid, group in tqdm(events, desc=f'eicu | group events ({table_name})'):
             if stayid not in eicu_data: continue
-            stay_event_list = eicu_data[stayid]['inputs']
+            stay_event_list = eicu_data[stayid]['chartevents'] if table_name.startswith('nurse') or table_name.startswith('vital') else eicu_data[stayid]['inputs']
             group.apply(map_table, axis=1, args=(stay_event_list,))
 
         return eicu_data
@@ -234,15 +235,24 @@ def preprocess_eicu(root_dir, dest_dir):
     tokenizer = AutoTokenizer.from_pretrained('emilyalsentzer/Bio_ClinicalBERT')
 
     for stayid, icustay in tqdm(small_eicu_data.items(), desc='eicu | sort and tokenize events'):
-        # pid = icustay['pid']
+        
         events = icustay['inputs']
-        sorted_events = sorted(events, key=lambda a: a['offset'])
+        
+        chartevents = icustay['chartevents']
+        sorted_chartevents = list(sorted(chartevents, key=lambda a: a['offset']))[:max(0, 256-len(events))]
+        
+        sorted_events = sorted(events + sorted_chartevents, key=lambda a: a['offset'])
+        
         final_icustay = {
             'labels': icustay['labels']
         }
         final_events = []
+
         for event in sorted_events[:256]:
             final_events.append(event['text'])
+        
+        assert len(final_events) <= 256
+
         final_icustay['input'] = np.array(tokenizer(final_events, max_length=128, truncation=True, padding='max_length')['input_ids'])
 
         final_eicu_data[stayid] = final_icustay
@@ -437,7 +447,7 @@ def preprocess_mimiciii(root_dir, dest_dir, sample_filtering):
     return 
 
 ########## mimiciv preprocess functions ##########
-def preprocess_mimiciv(root_dir, dest_dir):
+def preprocess_mimiciv(root_dir, dest_dir, sample_filtering):
     
     MIMIC4_DIR = os.path.join(root_dir, 'mimiciv')
     LABELS_PATH = os.path.join(root_dir, 'labels', 'mimiciv_labels.csv')
@@ -445,16 +455,16 @@ def preprocess_mimiciv(root_dir, dest_dir):
     PRESCRIPTION_PATH = os.path.join(MIMIC4_DIR, 'prescriptions.csv')
     LABEVENTS_PATH = os.path.join(MIMIC4_DIR, 'labevents.csv')
     OUTPUTEVENTS_PATH = os.path.join(MIMIC4_DIR, 'outputevents.csv')
-    D_LABITEMS_PAHT=os.path.join(MIMIC4_DIR, 'd_labitems.csv')
-    D_ITEMS_PATH = os.path.join(MIMIC4_DIR, 'd_items.csv.gz')
+    D_LABITEMS_PATH=os.path.join(MIMIC4_DIR, 'd_labitems.csv')
+    D_ITEMS_PATH = os.path.join(MIMIC4_DIR, 'd_items.csv')
     CHARTEVENTS_PATH = os.path.join(MIMIC4_DIR, 'chartevents.csv')
     
     inputevent = pd.DataFrame(pd.read_csv(INPUTEVENT_PATH))
     prescription = pd.DataFrame(pd.read_csv(PRESCRIPTION_PATH))
     labevents = pd.DataFrame(pd.read_csv(LABEVENTS_PATH))
     outputevent = pd.DataFrame(pd.read_csv(OUTPUTEVENTS_PATH))
-    d_labitems = pd.DataFrame(pd.read_csv(D_LABITEMS_PAHT))
-    d_itmes=pd.DataFrame(pd.read_csv(D_ITEMS_PATH, compression='gzip', sep=','))
+    d_labitems = pd.DataFrame(pd.read_csv(D_LABITEMS_PATH))
+    d_itmes=pd.DataFrame(pd.read_csv(D_ITEMS_PATH))
     labels = pd.DataFrame(pd.read_csv(LABELS_PATH))
     chartevents = list(pd.read_csv(CHARTEVENTS_PATH, chunksize=10000))
     
@@ -676,13 +686,13 @@ def preprocess_mimiciv(root_dir, dest_dir):
         
         return chart_dict
     
+    # Modify itemid -> medical code descriptions
     labitem_name = get_labitem_name(d_labitems)
     item_name = get_item_name(d_itmes)
     labevents['item_name'] = None
     labevents['item_name'] = labevents.apply(lambda row: parsing(row['itemid']) ,axis=1 )
     outputevent['item_name'] = outputevent.apply(lambda row: parsing2(row['itemid']), axis=1)
     inputevent['item_name'] = inputevent.apply(lambda row: parsing2(row['itemid']), axis=1)
-    
     
     ##collect all events by stay_id
     print("collecting")
@@ -770,6 +780,14 @@ def preprocess_mimiciv(root_dir, dest_dir):
     tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
     print("saving")
     tokenizing(dest_dir,final, tokenizer,labels)
+
+    if not sample_filtering:
+        for icustay in np.setdiff1d(labels['stay_id'].to_numpy(), np.fromiter(final.keys(), dtype=int)):
+            empty = dict()
+            empty['input'] = np.array([])
+            empty['label'] = eval(labels[labels['stay_id'] == icustay].iloc[0]['labels'])
+            with open(os.path.join(dest_dir, f'mimic4_{icustay}.pkl'), 'wb') as f:
+                pickle.dump(empty,f)
 
 
 if __name__ == "__main__":
