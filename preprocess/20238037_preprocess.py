@@ -86,6 +86,7 @@ def preprocess_eicu(root_dir, dest_dir):
             stayid, labels = row
             eicu_data[stayid] = {
                 'inputs': [],
+                'chartevents': [],
                 'labels': np.array(eval(labels)),
                 'pid': -1,
             }
@@ -132,7 +133,7 @@ def preprocess_eicu(root_dir, dest_dir):
         events = df.get(['patientunitstayid', offset_col, 'text']).groupby('patientunitstayid')
         for stayid, group in tqdm(events, desc=f'eicu | group events ({table_name})'):
             if stayid not in eicu_data: continue
-            stay_event_list = eicu_data[stayid]['inputs']
+            stay_event_list = eicu_data[stayid]['chartevents'] if table_name.startswith('nurse') or table_name.startswith('vital') else eicu_data[stayid]['inputs']
             group.apply(map_table, axis=1, args=(stay_event_list,))
 
         return eicu_data
@@ -229,15 +230,24 @@ def preprocess_eicu(root_dir, dest_dir):
     tokenizer = AutoTokenizer.from_pretrained('emilyalsentzer/Bio_ClinicalBERT')
 
     for stayid, icustay in tqdm(small_eicu_data.items(), desc='eicu | sort and tokenize events'):
-        # pid = icustay['pid']
+        
         events = icustay['inputs']
-        sorted_events = sorted(events, key=lambda a: a['offset'])
+        
+        chartevents = icustay['chartevents']
+        sorted_chartevents = list(sorted(chartevents, key=lambda a: a['offset']))[:max(0, 256-len(events))]
+        
+        sorted_events = sorted(events + sorted_chartevents, key=lambda a: a['offset'])
+        
         final_icustay = {
             'labels': icustay['labels']
         }
         final_events = []
+
         for event in sorted_events[:256]:
             final_events.append(event['text'])
+        
+        assert len(final_events) <= 256
+
         final_icustay['input'] = np.array(tokenizer(final_events, max_length=128, truncation=True, padding='max_length')['input_ids'])
 
         final_eicu_data[stayid] = final_icustay
