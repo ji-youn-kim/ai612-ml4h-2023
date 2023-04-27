@@ -27,7 +27,7 @@ def get_parser():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--root",
+        "root",
         metavar="DIR",
         help="root directory containing different ehr files to pre-process (usually, 'train/')"
     )
@@ -37,11 +37,9 @@ def get_parser():
         metavar="DIR",
         help="output directory"
     )
-
     parser.add_argument(
         "--sample_filtering",
-        type=bool,
-        default=True,
+        action='store_true',
         help="indicator to prevent filtering from being applies to the test dataset."
     )
 

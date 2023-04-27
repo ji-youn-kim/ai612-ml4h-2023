@@ -24,7 +24,10 @@ def save_checkpoint(args, trainer, epoch, val_loss):
 
     prev_best = getattr(save_checkpoint, "best", val_loss)
     if val_loss is not None:
-        best_function = max 
+        if args.pretrain:
+            best_function = min
+        else:
+            best_function = max 
         save_checkpoint.best = best_function(val_loss, prev_best)
 
     if not trainer.should_save_checkpoint_on_current_rank:
@@ -37,8 +40,11 @@ def save_checkpoint(args, trainer, epoch, val_loss):
 
     logger.info(f"preparing to save checkpoint for epoch {epoch} @ {updates} updates")
 
-    def is_better(a, b):
-        return a >= b
+    def is_better(args, a, b):
+        if args.pretrain:
+            return a <= b
+        else:
+            return a >= b
     
     checkpoint_conds = collections.OrderedDict()
     checkpoint_conds["checkpoint{}.pt".format(epoch)] = (epoch % args.save_interval == 0)

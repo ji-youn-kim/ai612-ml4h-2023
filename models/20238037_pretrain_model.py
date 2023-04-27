@@ -4,32 +4,25 @@ import math
 import torch
 import torch.nn as nn
 
-from . import BaseModel, register_model
+from distributed.gather_layer import GatherLayer
 
-@register_model("20238037_model")
-class MyModel20238037(BaseModel):
-    """
-    TODO:
-        create your own model here to handle heterogeneous EHR formats.
-        Rename the class name and the file name with your student number.
+from . import BaseModel, register_model
     
-    Example:
-    - 20218078_model.py
-        @register_model("20218078_model")
-        class MyModel20218078(BaseModel):
-            (...)
-    """
+
+@register_model("20238037_simclr_model")
+class SimCLR20238037(BaseModel):
     
     def __init__(
         self,
+        distributed_world_size,
         **kwargs,
     ):
         super().__init__()
+        self.world_size = distributed_world_size
 
         self.input_emb = TokenEmbedding(**kwargs)
         self.event_encoder = TransformerEventEncoder(**kwargs)
         self.event_aggregator = TransformerEventAggregator(**kwargs)
-        self.predict = PredictOutput(**kwargs)
     
     def get_logits(cls, net_output): # 
         """get logits from the net's output.
@@ -38,15 +31,6 @@ class MyModel20238037(BaseModel):
             Assure that get_logits(...) should return the logits in the shape of (batch, 52)
         """
         return net_output
-    
-    def get_targets(self, sample):
-        """get targets from the sample
-        
-        Note:
-            Assure that get_targets(...) should return the ground truth labels
-                in the shape of (batch, 28)
-        """
-        return sample["label"]
 
     def forward(
         self,
@@ -58,9 +42,11 @@ class MyModel20238037(BaseModel):
         emb_event = self.input_emb(input) # (B, E, S) -> (B*E, S, Emb_in)
         encode_event = self.event_encoder(emb_event, input) # (B*E, S, Emb_in) -> (B, E, Emb_out)
         aggregate_event = self.event_aggregator(encode_event, input) # (B, E, Emb_out) -> (B, Emb_out)
-        predict = self.predict(aggregate_event, input)
+        
+        if self.world_size > 1:
+            aggregate_event = torch.cat(GatherLayer.apply(aggregate_event), dim=0)
 
-        return predict
+        return aggregate_event
 
 
 class TokenEmbedding(nn.Module):
@@ -190,41 +176,7 @@ class TransformerEventAggregator(nn.Module):
         aggregate_event = torch.div(aggregate_event.sum(dim=1), (aggregate_event!=0).sum(dim=1)) # (B, Emb_out)
 
         return aggregate_event
-
-
-class PredictOutput(nn.Module):
-    def __init__(
-        self,
-        emb_out=128,
-        tasks=["mort_short", "mort_long", "readm", "dx", "los_short", "los_long", "fi_ac", "im_disch", "creat", "bili", "plate", "wbc"],
-        **kwargs,
-    ):
-        super().__init__()
-        self.emb_out, self.tasks = emb_out, tasks
-        self.final_proj = nn.ModuleDict()
-        classes = {
-            "mort_short": 1, "mort_long": 1, "readm": 1, "dx": 17, "los_short": 1, "los_long": 1, 
-            "fi_ac": 6, "im_disch": 6, "creat": 5, "bili": 5, "plate": 5, "wbc": 3
-        }
-        for task in self.tasks:
-            self.final_proj[task] = nn.Linear(
-                self.emb_out, classes[task]
-            )
     
-    def forward(
-        self,
-        aggregate_event, # (B, Emb_out)
-        **kwargs
-    ):
-
-        preds = []
-        for _, layer in self.final_proj.items():
-            preds.append(layer(aggregate_event)) 
-
-        output = torch.cat(preds, 1)
-
-        return output # (B, 52)
-
 
 class PositionalEncoding(nn.Module):
     def __init__(self, dim, dropout, sequence_len):

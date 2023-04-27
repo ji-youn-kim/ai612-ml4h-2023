@@ -8,7 +8,7 @@ import time
 import math
 import warnings
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 from itertools import chain
 from argparse import Namespace
 
@@ -22,7 +22,7 @@ import checkpoint_utils
 import models
 import optim
 from loggings import meters, metrics
-from criterion import MultiTaskCriterion
+from criterion import MultiTaskCriterion, SimCLRCriterion
 from optim import lr_scheduler
 from file_io import PathManager
 
@@ -35,7 +35,7 @@ class Trainer(object):
         self,
         args: Namespace,
         model: models.BaseModel,
-        criterion: MultiTaskCriterion,
+        criterion: Union[MultiTaskCriterion, SimCLRCriterion],
         train: torch.utils.data.Dataset = None,
         test: torch.utils.data.Dataset = None,
     ):
