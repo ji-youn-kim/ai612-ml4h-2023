@@ -30,7 +30,7 @@ import utils
 import checkpoint_utils
 import data
 from loggings import metrics, meters, progress_bar
-from criterion import MultiTaskCriterion
+from criterion import MultiTaskCriterion, SimCLRCriterion
 from distributed import utils as distributed_utils
 from trainer import Trainer
 
@@ -49,6 +49,11 @@ def get_parser():
         type=str,
         required=True,
         help="path to your processed features, will be used in the dataset class"
+    )
+    parser.add_argument(
+        "--pretrain",
+        action="store_true",
+        help="whether to conduct pretraining"
     )
 
     # validation
@@ -305,14 +310,18 @@ def main(args: argparse.Namespace) -> None:
     logger.info(args)
     
     # Build model
-    model = models.build_model(args.student_number + "_model", **vars(args))
-    criterion = MultiTaskCriterion.build_criterion(args)
+    if args.pretrain:
+        model = models.build_model(args.student_number + "_simclr_model", **vars(args))
+        criterion = SimCLRCriterion.build_criterion(args)
+        args.dataset = args.student_number + "_pretrain_dataset"
+    else:
+        model = models.build_model(args.student_number + "_model", **vars(args))
+        criterion = MultiTaskCriterion.build_criterion(args)
+        args.dataset = args.student_number + "_dataset"
     
     logger.info(model)
     logger.info("model: {}".format(model.__class__.__name__))
 
-    # load dataset
-    args.dataset = args.student_number + "_dataset"
     dataset = data.build_dataset(args)
 
     trainer = Trainer(args, model, criterion, train=dataset)
@@ -405,8 +414,9 @@ def train(
     logger.info("end of epoch {} (average epoch stats below)".format(epoch))
     stats = get_training_stats(metrics.get_smoothed_values("train"))
 
-    stats["auroc"] = metrics.get_meter("train", "_auc").auroc
-    stats["auprc"] = metrics.get_meter("train", "_auc").auprc
+    if not args.pretrain:
+        stats["auroc"] = metrics.get_meter("train", "_auc").auroc
+        stats["auprc"] = metrics.get_meter("train", "_auc").auprc
 
     progress.print(stats, tag="train", step=num_updates)
 
@@ -467,7 +477,11 @@ def validate(
     
     progress.print(stats, tag="valid", step=trainer.get_num_updates())
 
-    return stats["auroc"]
+    if args.pretrain:
+        return stats["loss"]
+
+    else:
+        return stats["auroc"]
 
 def get_valid_stats(
     args: argparse.Namespace,
