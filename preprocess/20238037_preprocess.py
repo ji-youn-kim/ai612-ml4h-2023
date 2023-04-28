@@ -14,9 +14,7 @@ from copy import copy
 from transformers import AutoTokenizer
 from operator import itemgetter
 import multiprocessing as mp
-import wandb
-wandb.init(project="ML4H preprocess")
-wandb.run.name = 'add timestamp class && except cases in concat function'
+
 def get_parser():
     """
     Note:
