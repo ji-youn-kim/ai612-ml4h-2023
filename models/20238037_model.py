@@ -58,7 +58,7 @@ class MyModel20238037(BaseModel):
         emb_event = self.input_emb(input) # (B, E, S) -> (B*E, S, Emb_in)
         encode_event = self.event_encoder(emb_event, input) # (B*E, S, Emb_in) -> (B, E, Emb_out)
         aggregate_event = self.event_aggregator(encode_event, input) # (B, E, Emb_out) -> (B, Emb_out)
-        predict = self.predict(aggregate_event, input)
+        predict = self.predict(aggregate_event)
 
         return predict
 
