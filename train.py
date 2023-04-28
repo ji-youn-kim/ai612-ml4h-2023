@@ -6,12 +6,13 @@
 
 import argparse
 import logging
+import logging.config
 from typing import Dict, Any, List, Optional
 import math
 import random
 import os
 import sys
-import logging.config
+import time
 
 # We need to setup root logger before importing any project libraries.
 logging.basicConfig(
@@ -54,6 +55,11 @@ def get_parser():
         "--pretrain",
         action="store_true",
         help="whether to conduct pretraining"
+    )
+    parser.add_argument(
+        "--finetune",
+        action="store_true",
+        help="whether to conduct finetuning"
     )
 
     # validation
@@ -251,6 +257,18 @@ def get_parser():
         help="path to save checkpoints"
     )
     parser.add_argument(
+        "--load_dir",
+        type=str,
+        default="checkpoints",
+        help="path to load pretrained checkpoints for finetuning"
+    )
+    parser.add_argument(
+        "--load_ckpt",
+        type=str,
+        default="pretrain_best.pt",
+        help="pretrained checkpoint name"
+    )
+    parser.add_argument(
         "--save_interval",
         type=int,
         default=1,
@@ -319,6 +337,18 @@ def main(args: argparse.Namespace) -> None:
         criterion = MultiTaskCriterion.build_criterion(args)
         args.dataset = args.student_number + "_dataset"
     
+    if args.finetune: 
+        args.load_path = os.path.join(args.load_dir, args.load_ckpt)
+        logger.info(f"Loading pretrained state from {args.load_path}")
+        st = time.time()
+        if args.distributed_world_size > 1:
+            state = checkpoint_utils.load_checkpoint_to_cpu(args.load_path, load_on_all_ranks=True)
+        else:
+            state = checkpoint_utils.load_checkpoint_to_cpu(args.load_path)
+        model.load_state_dict(state["model"], strict=False)
+        elapsed = time.time() - st
+        logger.info(f"Loaded pretrained checkpoint in {elapsed:.2f}s")
+
     logger.info(model)
     logger.info("model: {}".format(model.__class__.__name__))
 
